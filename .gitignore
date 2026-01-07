@@ -1,0 +1,14 @@
+# Transcripts (generated output)
+.claude/transcripts/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+*.swp
+*.swo

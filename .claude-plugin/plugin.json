@@ -1,0 +1,9 @@
+{
+  "name": "snoop",
+  "description": "Captures Claude Code single-turn transcripts for debugging and review",
+  "version": "1.0.0",
+  "author": {
+    "name": "rcrsr"
+  },
+  "license": "MIT"
+}
