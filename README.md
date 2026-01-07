@@ -116,19 +116,3 @@ Interrupt markers appear when user hits ESC:
 /snoop:review token usage
 /snoop:review abc12345.jsonl policy compliance
 ```
-
-## Structure
-
-```
-snoop/
-├── .claude-plugin/
-│   └── plugin.json
-├── agents/
-│   └── transcript-reviewer.md
-├── commands/
-│   └── review.md
-├── hooks/
-│   ├── capture-transcript.mjs
-│   └── hooks.json
-└── README.md
-```
