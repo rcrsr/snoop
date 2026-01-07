@@ -26,18 +26,12 @@ Optional scope flags:
 - `--scope project` — install for all collaborators on this repo
 - `--scope local` — install for yourself in this repo only
 
-### From Local Folder
+### Local Development
 
-For development or testing from a local clone:
-
-```
-/plugin install ~/projects/snoop --scope project
-```
-
-Or launch Claude with the plugin directory:
+Launch Claude with the plugin directory:
 
 ```bash
-claude --plugin-dir [plugin-root-path]
+claude --plugin-dir ~/projects/snoop
 ```
 
 ## Commands

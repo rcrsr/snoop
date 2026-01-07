@@ -289,6 +289,12 @@ async function main() {
 
   fs.mkdirSync(outputDir, { recursive: true });
 
+  // Ensure transcripts are not committed
+  const gitignorePath = path.join(outputDir, ".gitignore");
+  if (!fs.existsSync(gitignorePath)) {
+    fs.writeFileSync(gitignorePath, "*\n");
+  }
+
   if (hookEvent === "UserPromptSubmit") {
     await handleUserPromptSubmit(transcriptPath, partialFile);
     process.exit(0);

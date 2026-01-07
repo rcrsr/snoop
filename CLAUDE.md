@@ -4,7 +4,7 @@ A Claude Code plugin that captures single-turn Claude Code transcripts for debug
 
 To test locally:
 ```bash
-claude plugin install ~/projects/snoop --scope project
+claude --plugin-dir ~/projects/snoop
 ```
 
 ## Architecture
