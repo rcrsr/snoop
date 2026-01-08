@@ -1,9 +1,10 @@
 {
   "name": "snoop",
   "description": "Captures Claude Code single-turn transcripts for debugging and review",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
-    "name": "rcrsr"
+    "name": "Andre Bremer",
+    "url": "https://andrebremer.com"
   },
   "license": "MIT"
 }

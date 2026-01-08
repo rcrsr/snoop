@@ -257,10 +257,9 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
     fs.unlinkSync(path.join(outputDir, file.name));
   }
 
-  const filename = path.basename(outputFile);
   return {
     decision: "approve",
-    systemMessage: `[Transcript captured: ${filename} | ${interrupted}${msgCount} messages | ${toolCount} tool calls | duration: ${duration} | tools: ${toolList}]`,
+    systemMessage: `[Transcript captured: ${randomId} | ${interrupted}${msgCount} messages | ${toolCount} tool calls | duration: ${duration} | tools: ${toolList}]`,
   };
 }
 
