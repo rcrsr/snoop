@@ -1,35 +1,49 @@
-A Claude Code plugin that captures single-turn Claude Code transcripts for debugging and review. Transcripts are stored as JSONL files in `.claude/transcripts/` with metadata about tool usage, duration, and ESC interrupt detection.
+# snoop
+
+Captures single-turn transcripts for debugging and review. Stores JSONL files in `.claude/transcripts/`.
 
 ## Development
 
-To test locally:
 ```bash
-claude --plugin-dir ~/projects/snoop
+claude --plugin-dir /path/to/snoop
 ```
 
 ## Architecture
 
 ```
-snoop/
-├── .claude-plugin/plugin.json   # Plugin manifest
-├── hooks/
-│   ├── hooks.json               # Hook event bindings
-│   └── capture-transcript.mjs   # Transcript capture hook
-├── agents/
-│   └── transcript-reviewer.md   # Review analysis agent
-└── commands/
-    └── review.md                # User command for transcript review
+hooks/
+└── hooks.json               # UserPromptSubmit + Stop bindings
+scripts/
+└── capture-transcript.mjs   # Dual-purpose hook handler
+agents/
+└── transcript-reviewer.md   # Post-mortem analysis agent
+commands/
+└── review.md                # /snoop:review - analyze transcript
 ```
 
-**Hook flow:**
-- `UserPromptSubmit`: Detects ESC interrupts by checking for pending tool_use in last assistant message. Saves partial transcripts to `.partial_{session_id}.jsonl`.
-- `Stop`: Merges any partials with final segment, writes complete transcript, updates `latest` pointer, cleans up old files (keeps 10).
+## Hook Flow
 
-**Transcript format:**
-Each JSONL line contains `type`, `timestamp`, `uuid`, and `message` with role and content blocks. Tool results truncated to 500 chars. Interrupt markers inserted when ESC detected.
+| Event | Behavior |
+|-------|----------|
+| `UserPromptSubmit` | Detects ESC interrupts (pending tool_use). Saves partial to `.partial_{session_id}.jsonl` |
+| `Stop` | Merges partials, writes complete transcript, updates `latest` pointer, keeps 10 files |
 
 ## Key Files
 
-- `hooks/capture-transcript.mjs`: Transcript capture hook. Handles both hook events via `hook_event_name` field. Key functions: `handleUserPromptSubmit()`, `handleStop()`, `streamlineMessage()`.
-- `agents/transcript-reviewer.md`: Defines the analysis methodology. Uses jq for large file surveys before targeted reads. Categorizes issues by severity (Critical/High/Medium/Low).
-- `commands/review.md`: Entry point command. Resolves transcript file from args or `latest` pointer, delegates to reviewer agent.
+| File | Responsibility |
+|------|----------------|
+| `scripts/capture-transcript.mjs` | Core hook. Routes via `hook_event_name`. Key functions: `handleUserPromptSubmit()`, `handleStop()`, `streamlineMessage()` |
+| `agents/transcript-reviewer.md` | Analysis methodology. Uses jq for surveys, categorizes issues by severity |
+| `commands/review.md` | Entry point. Resolves transcript from args or `latest` pointer |
+
+## Transcript Format
+
+JSONL with one message per line:
+
+| Field | Content |
+|-------|---------|
+| `type` | `user`, `assistant`, or `interrupt` |
+| `timestamp` | ISO timestamp |
+| `message.content` | Array of blocks (tool_use, tool_result, text, thinking) |
+
+Tool results truncated to 500 chars. Interrupt markers inserted on ESC.

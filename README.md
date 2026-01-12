@@ -1,112 +1,76 @@
-# Snoop
+# snoop
 
 Captures Claude Code single-turn transcripts for debugging and review.
 
-## Features
+## Why snoop?
 
-- Captures complete single-turn transcripts as streamlined JSONL
-- Detects ESC interrupts and marks them in the transcript
-- Tracks tool usage, duration, and message counts
-- Keeps last 10 transcripts, auto-cleans older ones
-- Writes `latest` pointer for easy access to most recent transcript
-- Includes review command and agent for transcript analysis
+**Debug failed sessions.** Review exactly what happened when Claude went off track. See every tool call, every decision point, every interrupt.
+
+**Catch anti-patterns.** The reviewer agent identifies loops, scope creep, redundant file reads, and incomplete work—issues that waste tokens and time.
+
+**ESC interrupt tracking.** Know when and why you interrupted Claude. Partial transcripts are preserved and merged into the final record.
+
+**Zero friction.** Runs automatically on every session. Keeps last 10 transcripts, auto-cleans older ones. No manual capture needed.
 
 ## Installation
 
-### From Marketplace
-
-Add the marketplace, then install the plugin:
-
-```
+```bash
+# From marketplace
 /plugin marketplace add rcrsr/claude-plugins
 /plugin install snoop@rcrsr
+
+# Or load locally
+claude --plugin-dir /path/to/snoop
 ```
 
-Optional scope flags:
-- `--scope project` — install for all collaborators on this repo
-- `--scope local` — install for yourself in this repo only
-
-### Local Development
-
-Launch Claude with the plugin directory:
+## Quick Start
 
 ```bash
-claude --plugin-dir ~/projects/snoop
+# Review your last session
+/snoop:review
+
+# Review specific transcript
+/snoop:review abc12345
+
+# Focus on specific concern
+/snoop:review token usage
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/snoop:review [file] [concern]` | Analyze single-turn transcript and generate review report |
-
-## Agents
-
-| Agent | Purpose |
-|-------|---------|
-| `transcript-reviewer` | Analyzes transcripts for behavioral issues and anti-patterns |
+| `/snoop:review [id] [concern]` | Analyze transcript, generate post-mortem report |
 
 ## Output
 
-Transcripts are saved to `$CLAUDE_PROJECT_DIR/.claude/transcripts/`:
+Transcripts saved to `.claude/transcripts/`:
 
 ```
 .claude/transcripts/
-├── latest          # Pointer to most recent transcript
-├── abc12345.jsonl  # Single-turn transcript
+├── latest          # Pointer to most recent
+├── abc12345.jsonl  # Current transcript
 └── def67890.jsonl  # Previous transcript
 ```
 
-## Hooks
-
-| Event | Purpose |
-|-------|---------|
-| `UserPromptSubmit` | Detect ESC interrupts, save partial transcripts |
-| `Stop` | Merge partials, capture complete transcript |
-
 ## Transcript Format
 
-Each line is a JSON object with:
+JSONL with one message per line:
 
 ```json
 {
   "type": "user|assistant|interrupt",
   "timestamp": "ISO-8601",
   "uuid": "message-uuid",
-  "message": {
-    "role": "user|assistant",
-    "content": "string or content blocks"
-  }
+  "message": { "role": "user|assistant", "content": "..." }
 }
 ```
 
-Interrupt markers appear when user hits ESC:
+Interrupt markers inserted when user hits ESC:
 
 ```json
 {
   "type": "interrupt",
-  "marker": "═══════════════════ ⚠️ USER HIT ESC ═══════════════════",
-  "timestamp": "ISO-8601"
+  "marker": "═══════════════════ ⚠️ USER HIT ESC ═══════════════════"
 }
-```
-
-## Usage
-
-### Review Latest Transcript
-
-```
-/snoop:review
-```
-
-### Review Specific Transcript
-
-```
-/snoop:review abc12345.jsonl
-```
-
-### Focus on Specific Concern
-
-```
-/snoop:review token usage
-/snoop:review abc12345.jsonl policy compliance
 ```
