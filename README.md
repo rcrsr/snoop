@@ -1,16 +1,36 @@
-# snoop
+# Snoop
 
 Captures Claude Code run transcripts for debugging and review.
 
-## Why snoop?
+## Why Snoop?
 
-**Debug failed sessions.** Review exactly what happened when Claude went off track. See every tool call, every decision point, every interrupt.
+**Observability.** Claude Code makes it difficult to review a specific transcript for a run. Snoop groups relevant messages by user prompt in your project ('.claude/transcripts') to make post-mortem analysis easier.
 
-**Catch anti-patterns.** The reviewer agent identifies loops, scope creep, redundant file reads, and incomplete work—issues that waste tokens and time.
+**Debug failed sessions.** When Claude goes off track, review the transcript to find where and why.
 
-**ESC interrupt tracking.** Know when and why you interrupted Claude. Partial transcripts are preserved and merged into the final record.
+**Catch anti-patterns.** The reviewer agent identifies loops, scope creep, redundant reads, and incomplete work.
 
-**Zero friction.** Runs automatically on every session. Keeps last 10 transcripts, auto-cleans older ones. No manual capture needed.
+**ESC interrupt tracking.** Partial transcripts preserve exactly where you interrupted and what was pending.
+
+**Zero friction.** Runs automatically. Keeps 10 transcripts, auto-cleans older ones.
+
+## How it works
+
+Snoop uses Claude Code's hook system to capture transcripts at two points:
+
+| Hook | Trigger | Action |
+|------|---------|--------|
+| `UserPromptSubmit` | User sends a message | Check for pending `tool_use` without `tool_result` (indicates ESC interrupt). Save partial transcript with interrupt marker. |
+| `Stop` | Session ends | Merge any partial transcripts, write final JSONL, update `latest` pointer, prune old files. |
+
+**Interrupt detection:** When you press ESC mid-response, Claude's last message contains a `tool_use` block that never received a `tool_result`. Snoop detects this pattern and inserts an interrupt marker before your next message.
+
+**Subagent capture:** The Task tool spawns subagents that run in separate contexts. Snoop extracts their transcripts from `toolUseResult` fields and merges them into the main transcript, tagged with `subagent: "agent-xxx"`.
+
+**File lifecycle:**
+1. During session: partial transcripts saved as `.partial_{session_id}.jsonl`
+2. On stop: partials merged into `{session_id}.jsonl`
+3. Cleanup: keeps 10 most recent transcripts, deletes older ones
 
 ## Installation
 

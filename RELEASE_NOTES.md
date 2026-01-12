@@ -1,5 +1,16 @@
 # Release Notes
 
+## 1.2.3
+
+**Transcript Reviewer Agent Update**
+
+- Add role definition and imperative workflow per agent best practices
+- Document new transcript fields: `subagent`, `requestId`, token counts (`input`, `output`, `cacheRead`, `cacheCreate`)
+- Add survey commands for subagent listing and token totals
+- Add issue categories: "Subagent Misuse" and "Token Waste"
+- Include token metrics and subagent count in report output
+- Use `haiku` model for cost-effective analysis
+
 ## 1.2.2
 
 **Timestamp Ordering Fix**
