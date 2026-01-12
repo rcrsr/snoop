@@ -1,5 +1,13 @@
 # Release Notes
 
+## 1.2.2
+
+**Timestamp Ordering Fix**
+
+- Sort messages chronologically before calculating duration and token usage
+- Fixes negative duration bug when subagent messages (appended last) have earlier timestamps
+- Fixes token counting capturing intermediate cumulative values instead of final totals
+
 ## 1.2.1
 
 **Accurate Token Counting**

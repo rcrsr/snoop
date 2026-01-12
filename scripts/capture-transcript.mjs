@@ -128,12 +128,14 @@ function formatDuration(seconds) {
 }
 
 function calculateDuration(messages) {
-  const timestamps = messages.map((m) => m.timestamp).filter((t) => !!t);
+  const timestamps = messages
+    .map((m) => m.timestamp)
+    .filter((t) => !!t)
+    .map((t) => new Date(t).getTime())
+    .sort((a, b) => a - b);
   if (timestamps.length < 2) return "unknown";
   try {
-    const first = new Date(timestamps[0]).getTime();
-    const last = new Date(timestamps[timestamps.length - 1]).getTime();
-    const seconds = Math.floor((last - first) / 1000);
+    const seconds = Math.floor((timestamps[timestamps.length - 1] - timestamps[0]) / 1000);
     return formatDuration(seconds);
   } catch {
     return "unknown";
@@ -236,11 +238,20 @@ function calculateTokenUsage(messages) {
   //
   // Why: Streaming output_tokens are unreliable (often 10x under-reported).
   // But toolUseResult contains accurate final counts for subagent tasks.
+  //
+  // Sort by timestamp: subagent messages may be appended at array end but have
+  // earlier timestamps. Sorting ensures byRequest.set() captures final cumulative values.
+
+  const sorted = [...messages].sort((a, b) => {
+    const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return ta - tb;
+  });
 
   const byRequest = new Map();
   const toolUseResults = [];
 
-  for (const msg of messages) {
+  for (const msg of sorted) {
     if (msg.requestId && msg.message?.usage) {
       byRequest.set(msg.requestId, msg.message.usage);
     }
