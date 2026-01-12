@@ -74,3 +74,25 @@ Interrupt markers inserted when user hits ESC:
   "marker": "═══════════════════ ⚠️ USER HIT ESC ═══════════════════"
 }
 ```
+
+## Token Counting
+
+Summary output shows `X / Y tokens (in / out)`:
+
+| Type | Source | Reason |
+|------|--------|--------|
+| Input | API-reported | Reliable (includes system prompt, history, cache) |
+| Output | Hybrid | Streaming counts unreliable, see below |
+
+**Output token strategy:**
+- Subagents: `toolUseResult.usage.output_tokens` (accurate final count)
+- Main conversation: content estimate (chars/4)
+
+**Why not use streaming `output_tokens`?** The API reports cumulative output tokens, but Claude Code doesn't always capture the final streaming chunk with the correct total. Example from real transcript:
+
+```
+Request A: 3 chunks, output_tokens: 8 → 8 → 243   ✓ (final chunk captured)
+Request B: 2 chunks, output_tokens: 1 → 1         ✗ (final chunk missing, actual: ~500)
+```
+
+The `toolUseResult` field on Task completions is written after the subagent finishes, so it contains correct cumulative values. Main conversation falls back to content estimation.

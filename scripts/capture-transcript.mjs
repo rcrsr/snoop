@@ -103,6 +103,18 @@ function streamlineMessage(msg) {
       };
     }
   }
+  // Capture toolUseResult for accurate subagent token counts
+  if (msg.toolUseResult?.usage) {
+    result.toolUseResult = {
+      agentId: msg.toolUseResult.agentId,
+      usage: {
+        input: msg.toolUseResult.usage.input_tokens || 0,
+        output: msg.toolUseResult.usage.output_tokens || 0,
+        cacheCreate: msg.toolUseResult.usage.cache_creation_input_tokens || 0,
+        cacheRead: msg.toolUseResult.usage.cache_read_input_tokens || 0,
+      },
+    };
+  }
   return result;
 }
 
@@ -156,27 +168,117 @@ function countEscInterrupts(messages) {
   return messages.filter((m) => m.type === "interrupt").length;
 }
 
+function getContentLength(block) {
+  if (!block) return 0;
+  switch (block.type) {
+    case "thinking":
+      return (block.thinking || "").length;
+    case "text":
+      return (block.text || "").length;
+    case "tool_use":
+      return JSON.stringify(block.input || {}).length;
+    case "tool_result":
+      return (typeof block.content === "string" ? block.content : JSON.stringify(block.content || "")).length;
+    default:
+      return 0;
+  }
+}
+
+function estimateTokensFromContent(messages) {
+  // Estimate tokens by counting content characters / 4
+  // Dedupe by uuid to avoid counting streaming chunks multiple times
+  const seen = new Set();
+  let inputChars = 0;
+  let outputChars = 0;
+
+  for (const msg of messages) {
+    if (msg.uuid && seen.has(msg.uuid)) continue;
+    if (msg.uuid) seen.add(msg.uuid);
+
+    const content = msg.message?.content;
+    if (!content) continue;
+
+    if (msg.type === "assistant") {
+      // Output: thinking, text, tool_use from assistant
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (["thinking", "text", "tool_use"].includes(block.type)) {
+            outputChars += getContentLength(block);
+          }
+        }
+      }
+    } else if (msg.type === "user") {
+      // Input: user prompt text and tool_result blocks
+      if (typeof content === "string") {
+        inputChars += content.length;
+      } else if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === "tool_result") {
+            inputChars += getContentLength(block);
+          } else if (block.type === "text") {
+            inputChars += (block.text || "").length;
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    input: Math.ceil(inputChars / 4),
+    output: Math.ceil(outputChars / 4),
+  };
+}
+
 function calculateTokenUsage(messages) {
-  // Group by requestId to avoid double-counting streaming chunks
-  // Take the last message per requestId (has final token counts)
+  // Strategy:
+  // 1. Input tokens: API-reported (reliable, includes system prompt + cache)
+  // 2. Output tokens: toolUseResult.usage (accurate for subagents) + content estimate for main
+  //
+  // Why: Streaming output_tokens are unreliable (often 10x under-reported).
+  // But toolUseResult contains accurate final counts for subagent tasks.
+
   const byRequest = new Map();
+  const toolUseResults = [];
+
   for (const msg of messages) {
     if (msg.requestId && msg.message?.usage) {
       byRequest.set(msg.requestId, msg.message.usage);
     }
+    // Collect toolUseResult from user messages (Task tool completions)
+    if (msg.toolUseResult?.usage) {
+      toolUseResults.push(msg.toolUseResult.usage);
+    }
   }
 
   let totalInput = 0;
-  let totalOutput = 0;
   let totalCacheCreate = 0;
   let totalCacheRead = 0;
 
   for (const usage of byRequest.values()) {
-    // Handle both streamlined format (input/output) and raw format (input_tokens/output_tokens)
     totalInput += usage.input ?? usage.input_tokens ?? 0;
-    totalOutput += usage.output ?? usage.output_tokens ?? 0;
     totalCacheCreate += usage.cacheCreate ?? usage.cache_creation_input_tokens ?? 0;
     totalCacheRead += usage.cacheRead ?? usage.cache_read_input_tokens ?? 0;
+  }
+
+  // Output tokens: prefer toolUseResult (accurate), fallback to content estimate
+  let totalOutput = 0;
+  if (toolUseResults.length > 0) {
+    // Use accurate counts from toolUseResult
+    for (const usage of toolUseResults) {
+      totalOutput += usage.output ?? usage.output_tokens ?? 0;
+      // Also add subagent input/cache to totals
+      totalInput += usage.input ?? usage.input_tokens ?? 0;
+      totalCacheCreate += usage.cacheCreate ?? usage.cache_creation_input_tokens ?? 0;
+      totalCacheRead += usage.cacheRead ?? usage.cache_read_input_tokens ?? 0;
+    }
+    // Add content estimate for main conversation (non-subagent messages)
+    const mainMessages = messages.filter((m) => !m.subagent);
+    const mainEstimate = estimateTokensFromContent(mainMessages);
+    totalOutput += mainEstimate.output;
+  } else {
+    // No subagents, use content estimate for everything
+    const estimated = estimateTokensFromContent(messages);
+    totalOutput = estimated.output;
   }
 
   return {
