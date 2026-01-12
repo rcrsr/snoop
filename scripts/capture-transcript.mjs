@@ -172,10 +172,11 @@ function calculateTokenUsage(messages) {
   let totalCacheRead = 0;
 
   for (const usage of byRequest.values()) {
-    totalInput += usage.input || 0;
-    totalOutput += usage.output || 0;
-    totalCacheCreate += usage.cacheCreate || 0;
-    totalCacheRead += usage.cacheRead || 0;
+    // Handle both streamlined format (input/output) and raw format (input_tokens/output_tokens)
+    totalInput += usage.input ?? usage.input_tokens ?? 0;
+    totalOutput += usage.output ?? usage.output_tokens ?? 0;
+    totalCacheCreate += usage.cacheCreate ?? usage.cache_creation_input_tokens ?? 0;
+    totalCacheRead += usage.cacheRead ?? usage.cache_read_input_tokens ?? 0;
   }
 
   return {
@@ -186,6 +187,41 @@ function calculateTokenUsage(messages) {
     totalInput: totalInput + totalCacheCreate + totalCacheRead,
     apiCalls: byRequest.size,
   };
+}
+
+async function getSubagentFiles(transcriptPath) {
+  // Transcript path: /path/to/session-id.jsonl
+  // Subagents dir:   /path/to/session-id/subagents/
+  const sessionDir = transcriptPath.replace(/\.jsonl$/, "");
+  const subagentsDir = path.join(sessionDir, "subagents");
+
+  if (!fs.existsSync(subagentsDir)) {
+    return [];
+  }
+
+  return fs.readdirSync(subagentsDir)
+    .filter((f) => f.endsWith(".jsonl"))
+    .map((f) => path.join(subagentsDir, f));
+}
+
+async function loadSubagentMessages(transcriptPath) {
+  const subagentFiles = await getSubagentFiles(transcriptPath);
+  const allMessages = [];
+
+  for (const file of subagentFiles) {
+    const agentId = path.basename(file, ".jsonl");
+    const messages = await readJsonLines(file);
+
+    for (const msg of messages) {
+      if (shouldSkipMessage(msg)) continue;
+
+      const streamlined = streamlineMessage(msg);
+      streamlined.subagent = agentId;
+      allMessages.push(streamlined);
+    }
+  }
+
+  return allMessages;
 }
 
 // -----------------------------------------------------------------------------
@@ -273,11 +309,15 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
     .map(streamlineMessage);
   combined.push(...current);
 
+  // Load and append subagent messages
+  const subagentMessages = await loadSubagentMessages(transcriptPath);
+  combined.push(...subagentMessages);
+
   // Write output
   const output = combined.map((m) => JSON.stringify(m)).join("\n") + "\n";
   fs.writeFileSync(outputFile, output);
 
-  // Calculate stats
+  // Calculate stats (include subagent tokens)
   const msgCount = combined.length;
   const toolCount = countToolUses(combined);
   const uniqueTools = getUniqueTools(combined);
@@ -287,6 +327,8 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   const interrupted = escCount > 0 ? `⚠️ ${escCount}x ESC | ` : "";
   const toolList = uniqueTools.join(", ") || "none";
   const tokenSummary = `${tokens.totalInput.toLocaleString()} / ${tokens.output.toLocaleString()} tokens (in / out)`;
+  const subagentCount = new Set(subagentMessages.map((m) => m.subagent)).size;
+  const subagentInfo = subagentCount > 0 ? ` | ${subagentCount} subagent${subagentCount > 1 ? "s" : ""}` : "";
 
   // Write latest pointer
   fs.writeFileSync(path.join(outputDir, "latest"), outputFile);
@@ -304,7 +346,7 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
 
   return {
     decision: "approve",
-    systemMessage: `[Transcript captured: ${randomId} | ${interrupted}${msgCount} messages | ${toolCount} tool calls | ${tokenSummary} | duration: ${duration} | tools: ${toolList}]`,
+    systemMessage: `[Transcript captured: ${randomId} | ${interrupted}${msgCount} messages | ${toolCount} tool calls | ${tokenSummary} | duration: ${duration}${subagentInfo} | tools: ${toolList}]`,
   };
 }
 

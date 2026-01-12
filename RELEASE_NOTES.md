@@ -1,5 +1,15 @@
 # Release Notes
 
+## 1.2.0
+
+**Subagent Transcript Capture**
+
+- Include subagent messages in captured transcripts (Task tool spawns subagents)
+- Tag subagent messages with `subagent: "agent-xxx"` for identification
+- Aggregate token usage across main transcript and all subagents
+- Display subagent count in summary: `51 messages | 4 subagents`
+- Handle both raw (`input_tokens`) and streamlined (`input`) token formats
+
 ## 1.1.0
 
 **Token Usage Tracking**
