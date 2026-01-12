@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Dual-purpose hook for capturing single-turn transcripts.
+ * Dual-purpose hook for capturing run transcripts.
  * - UserPromptSubmit: Detects ESC interrupts, saves partial transcripts
  * - Stop: Merges partials, captures complete transcript
  */
@@ -85,12 +85,23 @@ function streamlineMessage(msg) {
     uuid: msg.uuid,
     parentUuid: msg.parentUuid,
   };
+  if (msg.requestId) {
+    result.requestId = msg.requestId;
+  }
   if (msg.message) {
     const content = msg.message.content;
     result.message = {
       role: msg.message.role,
       content: Array.isArray(content) ? content.map(cleanContentBlock) : content,
     };
+    if (msg.message.usage) {
+      result.message.usage = {
+        input: msg.message.usage.input_tokens || 0,
+        output: msg.message.usage.output_tokens || 0,
+        cacheCreate: msg.message.usage.cache_creation_input_tokens || 0,
+        cacheRead: msg.message.usage.cache_read_input_tokens || 0,
+      };
+    }
   }
   return result;
 }
@@ -143,6 +154,38 @@ function getUniqueTools(messages) {
 
 function countEscInterrupts(messages) {
   return messages.filter((m) => m.type === "interrupt").length;
+}
+
+function calculateTokenUsage(messages) {
+  // Group by requestId to avoid double-counting streaming chunks
+  // Take the last message per requestId (has final token counts)
+  const byRequest = new Map();
+  for (const msg of messages) {
+    if (msg.requestId && msg.message?.usage) {
+      byRequest.set(msg.requestId, msg.message.usage);
+    }
+  }
+
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalCacheCreate = 0;
+  let totalCacheRead = 0;
+
+  for (const usage of byRequest.values()) {
+    totalInput += usage.input || 0;
+    totalOutput += usage.output || 0;
+    totalCacheCreate += usage.cacheCreate || 0;
+    totalCacheRead += usage.cacheRead || 0;
+  }
+
+  return {
+    input: totalInput,
+    output: totalOutput,
+    cacheCreate: totalCacheCreate,
+    cacheRead: totalCacheRead,
+    totalInput: totalInput + totalCacheCreate + totalCacheRead,
+    apiCalls: byRequest.size,
+  };
 }
 
 // -----------------------------------------------------------------------------
@@ -240,8 +283,10 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   const uniqueTools = getUniqueTools(combined);
   const duration = calculateDuration(combined);
   const escCount = countEscInterrupts(combined);
+  const tokens = calculateTokenUsage(combined);
   const interrupted = escCount > 0 ? `⚠️ ${escCount}x ESC | ` : "";
   const toolList = uniqueTools.join(", ") || "none";
+  const tokenSummary = `${tokens.totalInput.toLocaleString()} / ${tokens.output.toLocaleString()} tokens (in / out)`;
 
   // Write latest pointer
   fs.writeFileSync(path.join(outputDir, "latest"), outputFile);
@@ -259,7 +304,7 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
 
   return {
     decision: "approve",
-    systemMessage: `[Transcript captured: ${randomId} | ${interrupted}${msgCount} messages | ${toolCount} tool calls | duration: ${duration} | tools: ${toolList}]`,
+    systemMessage: `[Transcript captured: ${randomId} | ${interrupted}${msgCount} messages | ${toolCount} tool calls | ${tokenSummary} | duration: ${duration} | tools: ${toolList}]`,
   };
 }
 

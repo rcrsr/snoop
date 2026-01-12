@@ -5,7 +5,7 @@ argument-hint: "[transcript-id] [concern]"
 
 # Transcript Review
 
-Analyze a single-turn transcript to identify issues and improvement opportunities.
+Analyze a run transcript to identify issues and improvement opportunities.
 
 ## Examples
 

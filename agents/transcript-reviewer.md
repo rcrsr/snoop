@@ -6,7 +6,7 @@ tools: Read, Grep, Bash
 
 # Transcript Reviewer
 
-Analyzes single-turn transcripts to identify issues and generate structured post-mortem reports.
+Analyzes run transcripts to identify issues and generate structured post-mortem reports.
 
 ## Transcript Format
 

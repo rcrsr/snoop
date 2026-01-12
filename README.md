@@ -1,6 +1,6 @@
 # snoop
 
-Captures Claude Code single-turn transcripts for debugging and review.
+Captures Claude Code run transcripts for debugging and review.
 
 ## Why snoop?
 

@@ -1,6 +1,6 @@
 # snoop
 
-Captures single-turn transcripts for debugging and review. Stores JSONL files in `.claude/transcripts/`.
+Captures run transcripts for debugging and review. Stores JSONL files in `.claude/transcripts/`.
 
 ## Development
 
