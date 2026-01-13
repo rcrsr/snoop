@@ -1,5 +1,13 @@
 # Release Notes
 
+## 1.2.7
+
+**Token Summary Cleanup**
+
+- Skip 0 values in token breakdown instead of always showing all fields
+- Before: `150,000 in (50,000 p / 15,000 cw5m / 0 cw1h / 0 cr) | ~5,000 out`
+- After: `150,000 in (50,000 p / 15,000 cw5m) | ~5,000 out`
+
 ## 1.2.6
 
 **Cache Tier Breakdown & Cleanup**

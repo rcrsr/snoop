@@ -491,11 +491,14 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   const tokens = calculateTokenUsage(combined);
   const interrupted = escCount > 0 ? `⚠️ ${escCount}x ESC | ` : "";
   const toolList = uniqueTools.join(", ");
-  // Cache write breakdown: show cw5m/cw1h if 1h has tokens, otherwise just cw5m
-  const cacheWritePart = tokens.cache1h > 0
-    ? `${tokens.cache5m.toLocaleString()} cw5m / ${tokens.cache1h.toLocaleString()} cw1h`
-    : `${tokens.cache5m.toLocaleString()} cw5m`;
-  const tokenSummary = `${tokens.totalInput.toLocaleString()} in (${tokens.input.toLocaleString()} p / ${cacheWritePart} / ${tokens.cacheRead.toLocaleString()} cr) | ~${tokens.output.toLocaleString()} out`;
+  // Build token breakdown, skipping 0 values
+  const breakdownParts = [];
+  if (tokens.input > 0) breakdownParts.push(`${tokens.input.toLocaleString()} p`);
+  if (tokens.cache5m > 0) breakdownParts.push(`${tokens.cache5m.toLocaleString()} cw5m`);
+  if (tokens.cache1h > 0) breakdownParts.push(`${tokens.cache1h.toLocaleString()} cw1h`);
+  if (tokens.cacheRead > 0) breakdownParts.push(`${tokens.cacheRead.toLocaleString()} cr`);
+  const breakdown = breakdownParts.length > 0 ? ` (${breakdownParts.join(" / ")})` : "";
+  const tokenSummary = `${tokens.totalInput.toLocaleString()} in${breakdown} | ~${tokens.output.toLocaleString()} out`;
   const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort();
   const agentNameMap = buildAgentNameMap(combined);
   const subagentNames = subagentIds.map((id) => agentNameMap.get(id) || id);
