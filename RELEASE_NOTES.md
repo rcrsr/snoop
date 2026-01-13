@@ -1,5 +1,13 @@
 # Release Notes
 
+## 1.2.4
+
+**Duration Calculation Fix**
+
+- Filter subagent messages to only include those from the current turn
+- Fixes inflated duration when session contains subagents from previous turns
+- Previous bug: 52m duration reported for 2m turn (included old subagent timestamps)
+
 ## 1.2.3
 
 **Transcript Reviewer Agent Update**

@@ -422,8 +422,12 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
     .map(streamlineMessage);
   combined.push(...current);
 
-  // Load and append subagent messages
-  const subagentMessages = await loadSubagentMessages(transcriptPath);
+  // Load and append subagent messages (only from current turn)
+  const turnStart = current[0]?.timestamp ? new Date(current[0].timestamp).getTime() : 0;
+  const subagentMessages = (await loadSubagentMessages(transcriptPath)).filter((m) => {
+    if (!m.timestamp || !turnStart) return true;
+    return new Date(m.timestamp).getTime() >= turnStart;
+  });
   combined.push(...subagentMessages);
 
   // Write output
