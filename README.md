@@ -25,11 +25,11 @@ Snoop uses Claude Code's hook system to capture transcripts at two points:
 
 **Interrupt detection:** When you press ESC mid-response, Claude's last message contains a `tool_use` block that never received a `tool_result`. Snoop detects this pattern and inserts an interrupt marker before your next message.
 
-**Subagent capture:** The Task tool spawns subagents that run in separate contexts. Snoop extracts their transcripts from `toolUseResult` fields and merges them into the main transcript, tagged with `subagent: "agent-xxx"`.
+**Subagent capture:** The Task tool spawns subagents that run in separate contexts. Snoop loads their transcripts from Claude Code's internal `subagents/` log directory and merges them into the main transcript, tagged with `subagent: "agent-xxx"`.
 
 **File lifecycle:**
 1. During session: partial transcripts saved as `.partial_{session_id}.jsonl`
-2. On stop: partials merged into `{session_id}.jsonl`
+2. On stop: partials merged into `{random_id}.jsonl` (8-char ID)
 3. Cleanup: keeps 10 most recent transcripts, deletes older ones
 
 ## Installation
@@ -55,6 +55,45 @@ claude --plugin-dir /path/to/snoop
 # Focus on specific concern
 /snoop:review token usage
 ```
+
+## Status Line
+
+After each session, Snoop outputs a status line:
+
+```
+[abc12345 | 2m 30s | 45 msgs | 150,000 in (50,000 p / 20,000 cw / 80,000 cr) | ~5,000 out | 2 subagents (agent-abc, agent-xyz) | 12 tools (Read, Edit, Bash)]
+```
+
+| Field | Meaning |
+|-------|---------|
+| `abc12345` | Transcript ID (use with `/snoop:review abc12345`) |
+| `2m 30s` | Session duration |
+| `45 msgs` | Total messages captured |
+| `150,000 in` | Total input tokens (prompt + cache read + cache write) |
+| `50,000 p` | Prompt tokens (non-cached input) |
+| `20,000 cw` | Cache write tokens |
+| `80,000 cr` | Cache read tokens |
+| `~5,000 out` | Estimated output tokens (tilde indicates estimate) |
+| `2 subagents (...)` | Subagent count with IDs |
+| `12 tools (...)` | Tool invocations with list of unique tools used |
+
+**With ESC interrupts:**
+```
+[abc12345 | 1m 15s | ⚠️ 2x ESC | 23 msgs | ...]
+```
+
+## Token Counting
+
+| Type | Source | Reliability |
+|------|--------|-------------|
+| Input | API-reported | Reliable (includes system prompt, history, cache) |
+| Output | Hybrid | Estimated (see below) |
+
+**Output token strategy:**
+- Subagents: `toolUseResult.usage.output_tokens` (accurate final count)
+- Main conversation: content estimate (chars/4)
+
+**Why estimate output?** Claude Code logs include cumulative output tokens during streaming, but the final chunk isn't always captured. The `toolUseResult` field contains correct totals for subagents; main conversation falls back to content estimation.
 
 ## Commands
 
@@ -94,25 +133,3 @@ Interrupt markers inserted when user hits ESC:
   "marker": "═══════════════════ ⚠️ USER HIT ESC ═══════════════════"
 }
 ```
-
-## Token Counting
-
-Summary output shows `X / Y tokens (in / out)`:
-
-| Type | Source | Reason |
-|------|--------|--------|
-| Input | API-reported | Reliable (includes system prompt, history, cache) |
-| Output | Hybrid | Streaming counts unreliable, see below |
-
-**Output token strategy:**
-- Subagents: `toolUseResult.usage.output_tokens` (accurate final count)
-- Main conversation: content estimate (chars/4)
-
-**Why not use streaming `output_tokens`?** The API reports cumulative output tokens, but Claude Code doesn't always capture the final streaming chunk with the correct total. Example from real transcript:
-
-```
-Request A: 3 chunks, output_tokens: 8 → 8 → 243   ✓ (final chunk captured)
-Request B: 2 chunks, output_tokens: 1 → 1         ✗ (final chunk missing, actual: ~500)
-```
-
-The `toolUseResult` field on Task completions is written after the subagent finishes, so it contains correct cumulative values. Main conversation falls back to content estimation.

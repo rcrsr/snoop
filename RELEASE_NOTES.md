@@ -1,5 +1,16 @@
 # Release Notes
 
+## 1.2.5
+
+**Status Line Improvements**
+
+- New token format: `150,000 in (50,000 p / 20,000 cw / 80,000 cr) | ~5,000 out`
+  - Shows total input with breakdown: prompt (p), cache write (cw), cache read (cr)
+  - Output prefixed with `~` to indicate estimate
+- Subagent IDs now listed: `2 subagents (agent-abc, agent-xyz)`
+- Renamed "tool calls" to "tools" for brevity
+- README updated with Status Line and Token Counting sections
+
 ## 1.2.4
 
 **Duration Calculation Fix**

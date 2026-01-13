@@ -442,10 +442,11 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   const escCount = countEscInterrupts(combined);
   const tokens = calculateTokenUsage(combined);
   const interrupted = escCount > 0 ? `⚠️ ${escCount}x ESC | ` : "";
-  const toolList = uniqueTools.join(", ") || "none";
-  const tokenSummary = `${tokens.totalInput.toLocaleString()} / ${tokens.output.toLocaleString()} tokens (in / out)`;
-  const subagentCount = new Set(subagentMessages.map((m) => m.subagent)).size;
-  const subagentInfo = subagentCount > 0 ? ` | ${subagentCount} subagent${subagentCount > 1 ? "s" : ""}` : "";
+  const toolList = uniqueTools.join(", ");
+  const tokenSummary = `${tokens.totalInput.toLocaleString()} in (${tokens.input.toLocaleString()} p / ${tokens.cacheCreate.toLocaleString()} cw / ${tokens.cacheRead.toLocaleString()} cr) | ~${tokens.output.toLocaleString()} out`;
+  const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort();
+  const subagentInfo = subagentIds.length > 0 ? ` | ${subagentIds.length} subagent${subagentIds.length > 1 ? "s" : ""} (${subagentIds.join(", ")})` : "";
+  const toolInfo = toolCount > 0 ? ` | ${toolCount} tools (${toolList})` : "";
 
   // Write latest pointer
   fs.writeFileSync(path.join(outputDir, "latest"), outputFile);
@@ -463,7 +464,7 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
 
   return {
     decision: "approve",
-    systemMessage: `[Transcript captured: ${randomId} | ${interrupted}${msgCount} messages | ${toolCount} tool calls | ${tokenSummary} | duration: ${duration}${subagentInfo} | tools: ${toolList}]`,
+    systemMessage: `[${randomId} | ${duration} | ${interrupted}${msgCount} msgs | ${tokenSummary}${subagentInfo}${toolInfo}]`,
   };
 }
 

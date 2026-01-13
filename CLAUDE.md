@@ -1,49 +1,53 @@
 # snoop
 
-Captures run transcripts for debugging and review. Stores JSONL files in `.claude/transcripts/`.
+Claude Code plugin that captures run transcripts for debugging and review.
 
-## Development
+## Quick Reference
 
 ```bash
+# Test locally
 claude --plugin-dir /path/to/snoop
+
+# User commands
+/snoop:review              # Analyze last transcript
+/snoop:review abc12345     # Analyze specific transcript
 ```
 
 ## Architecture
 
-```
-hooks/
-└── hooks.json               # UserPromptSubmit + Stop bindings
-scripts/
-└── capture-transcript.mjs   # Dual-purpose hook handler
-agents/
-└── transcript-reviewer.md   # Post-mortem analysis agent
-commands/
-└── review.md                # /snoop:review - analyze transcript
-```
+| Path | Purpose |
+|------|---------|
+| `scripts/capture-transcript.mjs` | Core hook handler. Routes via `hook_event_name` env var |
+| `hooks/hooks.json` | Binds `UserPromptSubmit` and `Stop` events |
+| `agents/transcript-reviewer.md` | Post-mortem analysis agent (haiku model) |
+| `commands/review.md` | `/snoop:review` entry point |
 
-## Hook Flow
+## Hook Behavior
 
-| Event | Behavior |
-|-------|----------|
-| `UserPromptSubmit` | Detects ESC interrupts (pending tool_use). Saves partial to `.partial_{session_id}.jsonl` |
-| `Stop` | Merges partials, writes complete transcript, updates `latest` pointer, keeps 10 files |
+| Event | Action |
+|-------|--------|
+| `UserPromptSubmit` | Detect ESC interrupt (pending `tool_use`), save partial transcript |
+| `Stop` | Merge partials, write final JSONL, update `latest` pointer, prune to 10 files |
 
-## Key Files
+## When Editing
 
-| File | Responsibility |
-|------|----------------|
-| `scripts/capture-transcript.mjs` | Core hook. Routes via `hook_event_name`. Key functions: `handleUserPromptSubmit()`, `handleStop()`, `streamlineMessage()` |
-| `agents/transcript-reviewer.md` | Analysis methodology. Uses jq for surveys, categorizes issues by severity |
-| `commands/review.md` | Entry point. Resolves transcript from args or `latest` pointer |
+- **Status line format**: modify `tokenSummary`, `subagentInfo`, `toolInfo` in `handleStop()`
+- **Token calculation**: see `calculateTokenUsage()` - input from API, output estimated
+- **Message filtering**: `streamlineMessage()` controls what fields are captured
+- **Subagent loading**: `loadSubagentMessages()` reads from Claude Code's internal logs
 
-## Transcript Format
+## Transcript Schema
 
 JSONL with one message per line:
 
-| Field | Content |
-|-------|---------|
-| `type` | `user`, `assistant`, or `interrupt` |
-| `timestamp` | ISO timestamp |
-| `message.content` | Array of blocks (tool_use, tool_result, text, thinking) |
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | `user`, `assistant`, or `interrupt` |
+| `timestamp` | ISO string | Message timestamp |
+| `uuid` | string | Message UUID |
+| `requestId` | string | API request ID (for deduping streaming chunks) |
+| `subagent` | string | Agent ID if from Task tool subagent |
+| `message.content` | array | Blocks: `tool_use`, `tool_result`, `text`, `thinking` |
+| `message.usage` | object | `input`, `output`, `cacheRead`, `cacheCreate` token counts |
 
-Tool results truncated to 500 chars. Interrupt markers inserted on ESC.
+Tool results truncated to 500 chars. Interrupt markers have `type: "interrupt"`.
