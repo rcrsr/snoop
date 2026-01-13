@@ -61,7 +61,7 @@ function cleanContentBlock(block) {
     case "thinking":
       return { type: block.type, thinking: block.thinking };
     case "tool_use":
-      return { type: block.type, name: block.name, input: block.input };
+      return { type: block.type, id: block.id, name: block.name, input: block.input };
     case "tool_result": {
       let content = block.content;
       if (typeof content === "string" && content.length > 500) {
@@ -75,7 +75,7 @@ function cleanContentBlock(block) {
 }
 
 function shouldSkipMessage(msg) {
-  return msg.type === "file-history-snapshot";
+  return msg.type === "file-history-snapshot" || msg.type === "summary";
 }
 
 function streamlineMessage(msg) {
@@ -100,20 +100,26 @@ function streamlineMessage(msg) {
         output: msg.message.usage.output_tokens || 0,
         cacheCreate: msg.message.usage.cache_creation_input_tokens || 0,
         cacheRead: msg.message.usage.cache_read_input_tokens || 0,
+        cache5m: msg.message.usage.cache_creation?.ephemeral_5m_input_tokens || 0,
+        cache1h: msg.message.usage.cache_creation?.ephemeral_1h_input_tokens || 0,
       };
     }
   }
-  // Capture toolUseResult for accurate subagent token counts
-  if (msg.toolUseResult?.usage) {
+  // Capture toolUseResult for subagent token counts and name mapping
+  if (msg.toolUseResult?.agentId) {
     result.toolUseResult = {
       agentId: msg.toolUseResult.agentId,
-      usage: {
+    };
+    if (msg.toolUseResult.usage) {
+      result.toolUseResult.usage = {
         input: msg.toolUseResult.usage.input_tokens || 0,
         output: msg.toolUseResult.usage.output_tokens || 0,
         cacheCreate: msg.toolUseResult.usage.cache_creation_input_tokens || 0,
         cacheRead: msg.toolUseResult.usage.cache_read_input_tokens || 0,
-      },
-    };
+        cache5m: msg.toolUseResult.usage.cache_creation?.ephemeral_5m_input_tokens || 0,
+        cache1h: msg.toolUseResult.usage.cache_creation?.ephemeral_1h_input_tokens || 0,
+      };
+    }
   }
   return result;
 }
@@ -168,6 +174,39 @@ function getUniqueTools(messages) {
 
 function countEscInterrupts(messages) {
   return messages.filter((m) => m.type === "interrupt").length;
+}
+
+function buildAgentNameMap(messages) {
+  // Map agentId -> subagent_type by linking Task tool_use to toolUseResult
+  const toolUseTypes = new Map(); // tool_use.id -> subagent_type
+  const agentNames = new Map(); // agentId -> subagent_type
+
+  // First pass: collect Task tool_use blocks
+  for (const msg of messages) {
+    if (msg.type !== "assistant" || !Array.isArray(msg.message?.content)) continue;
+    for (const block of msg.message.content) {
+      if (block.type === "tool_use" && block.name === "Task" && block.input?.subagent_type) {
+        toolUseTypes.set(block.id, block.input.subagent_type);
+      }
+    }
+  }
+
+  // Second pass: match toolUseResult.agentId to tool_result.tool_use_id
+  for (const msg of messages) {
+    if (msg.type !== "user" || !msg.toolUseResult?.agentId) continue;
+    const agentId = msg.toolUseResult.agentId;
+    if (!Array.isArray(msg.message?.content)) continue;
+
+    // Find the Task tool_result in this message
+    for (const block of msg.message.content) {
+      if (block.type === "tool_result" && toolUseTypes.has(block.tool_use_id)) {
+        agentNames.set("agent-" + agentId, toolUseTypes.get(block.tool_use_id));
+        break;
+      }
+    }
+  }
+
+  return agentNames;
 }
 
 function getContentLength(block) {
@@ -252,7 +291,8 @@ function calculateTokenUsage(messages) {
   const toolUseResults = [];
 
   for (const msg of sorted) {
-    if (msg.requestId && msg.message?.usage) {
+    // Main conversation only - subagent tokens come from toolUseResult
+    if (msg.requestId && msg.message?.usage && !msg.subagent) {
       byRequest.set(msg.requestId, msg.message.usage);
     }
     // Collect toolUseResult from user messages (Task tool completions)
@@ -264,11 +304,15 @@ function calculateTokenUsage(messages) {
   let totalInput = 0;
   let totalCacheCreate = 0;
   let totalCacheRead = 0;
+  let totalCache5m = 0;
+  let totalCache1h = 0;
 
   for (const usage of byRequest.values()) {
     totalInput += usage.input ?? usage.input_tokens ?? 0;
     totalCacheCreate += usage.cacheCreate ?? usage.cache_creation_input_tokens ?? 0;
     totalCacheRead += usage.cacheRead ?? usage.cache_read_input_tokens ?? 0;
+    totalCache5m += usage.cache5m ?? usage.cache_creation?.ephemeral_5m_input_tokens ?? 0;
+    totalCache1h += usage.cache1h ?? usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
   }
 
   // Output tokens: prefer toolUseResult (accurate), fallback to content estimate
@@ -281,6 +325,8 @@ function calculateTokenUsage(messages) {
       totalInput += usage.input ?? usage.input_tokens ?? 0;
       totalCacheCreate += usage.cacheCreate ?? usage.cache_creation_input_tokens ?? 0;
       totalCacheRead += usage.cacheRead ?? usage.cache_read_input_tokens ?? 0;
+      totalCache5m += usage.cache5m ?? usage.cache_creation?.ephemeral_5m_input_tokens ?? 0;
+      totalCache1h += usage.cache1h ?? usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
     }
     // Add content estimate for main conversation (non-subagent messages)
     const mainMessages = messages.filter((m) => !m.subagent);
@@ -297,6 +343,8 @@ function calculateTokenUsage(messages) {
     output: totalOutput,
     cacheCreate: totalCacheCreate,
     cacheRead: totalCacheRead,
+    cache5m: totalCache5m,
+    cache1h: totalCache1h,
     totalInput: totalInput + totalCacheCreate + totalCacheRead,
     apiCalls: byRequest.size,
   };
@@ -443,9 +491,15 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   const tokens = calculateTokenUsage(combined);
   const interrupted = escCount > 0 ? `⚠️ ${escCount}x ESC | ` : "";
   const toolList = uniqueTools.join(", ");
-  const tokenSummary = `${tokens.totalInput.toLocaleString()} in (${tokens.input.toLocaleString()} p / ${tokens.cacheCreate.toLocaleString()} cw / ${tokens.cacheRead.toLocaleString()} cr) | ~${tokens.output.toLocaleString()} out`;
+  // Cache write breakdown: show cw5m/cw1h if 1h has tokens, otherwise just cw5m
+  const cacheWritePart = tokens.cache1h > 0
+    ? `${tokens.cache5m.toLocaleString()} cw5m / ${tokens.cache1h.toLocaleString()} cw1h`
+    : `${tokens.cache5m.toLocaleString()} cw5m`;
+  const tokenSummary = `${tokens.totalInput.toLocaleString()} in (${tokens.input.toLocaleString()} p / ${cacheWritePart} / ${tokens.cacheRead.toLocaleString()} cr) | ~${tokens.output.toLocaleString()} out`;
   const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort();
-  const subagentInfo = subagentIds.length > 0 ? ` | ${subagentIds.length} subagent${subagentIds.length > 1 ? "s" : ""} (${subagentIds.join(", ")})` : "";
+  const agentNameMap = buildAgentNameMap(combined);
+  const subagentNames = subagentIds.map((id) => agentNameMap.get(id) || id);
+  const subagentInfo = subagentIds.length > 0 ? ` | ${subagentIds.length} subagent${subagentIds.length > 1 ? "s" : ""} (${subagentNames.join(", ")})` : "";
   const toolInfo = toolCount > 0 ? ` | ${toolCount} tools (${toolList})` : "";
 
   // Write latest pointer

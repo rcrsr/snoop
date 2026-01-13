@@ -1,5 +1,16 @@
 # Release Notes
 
+## 1.2.6
+
+**Cache Tier Breakdown & Cleanup**
+
+- Cache write tokens now show tier breakdown: `cw5m` (5-minute) and `cw1h` (1-hour ephemeral)
+  - `cw1h` only appears when 1h tier has tokens, otherwise shows just `cw5m`
+  - Example: `150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr)`
+- Capture `cache5m` and `cache1h` fields in `message.usage` and `toolUseResult.usage`
+- Filter out `summary` messages (Claude Code context metadata, not sent to API)
+- Fix: subagent name resolution now correctly maps `agent-xxx` prefix
+
 ## 1.2.5
 
 **Status Line Improvements**
@@ -7,8 +18,12 @@
 - New token format: `150,000 in (50,000 p / 20,000 cw / 80,000 cr) | ~5,000 out`
   - Shows total input with breakdown: prompt (p), cache write (cw), cache read (cr)
   - Output prefixed with `~` to indicate estimate
-- Subagent IDs now listed: `2 subagents (agent-abc, agent-xyz)`
+- Subagent types now listed: `2 subagents (Explore, claude-code-guide)` (falls back to ID)
+  - Maps agentId to subagent_type via Task tool_use → tool_result linkage
+  - Fix: capture toolUseResult.agentId even when usage data is missing
 - Renamed "tool calls" to "tools" for brevity
+- Fix: exclude subagent messages from `byRequest` to prevent double-counting input tokens
+- Fix: capture tool_use.id for name mapping
 - README updated with Status Line and Token Counting sections
 
 ## 1.2.4

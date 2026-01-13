@@ -48,6 +48,6 @@ JSONL with one message per line:
 | `requestId` | string | API request ID (for deduping streaming chunks) |
 | `subagent` | string | Agent ID if from Task tool subagent |
 | `message.content` | array | Blocks: `tool_use`, `tool_result`, `text`, `thinking` |
-| `message.usage` | object | `input`, `output`, `cacheRead`, `cacheCreate` token counts |
+| `message.usage` | object | `input`, `output`, `cacheRead`, `cacheCreate`, `cache5m`, `cache1h` token counts |
 
 Tool results truncated to 500 chars. Interrupt markers have `type: "interrupt"`.
