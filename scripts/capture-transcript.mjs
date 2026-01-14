@@ -501,7 +501,7 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   const tokenSummary = `${tokens.totalInput.toLocaleString()} in${breakdown} | ~${tokens.output.toLocaleString()} out`;
   const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort();
   const agentNameMap = buildAgentNameMap(combined);
-  const subagentNames = subagentIds.map((id) => agentNameMap.get(id) || id);
+  const subagentNames = [...new Set(subagentIds.map((id) => agentNameMap.get(id) || id))].sort();
   const subagentInfo = subagentIds.length > 0 ? ` | ${subagentIds.length} subagent${subagentIds.length > 1 ? "s" : ""} (${subagentNames.join(", ")})` : "";
   const toolInfo = toolCount > 0 ? ` | ${toolCount} tools (${toolList})` : "";
 
