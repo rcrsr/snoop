@@ -2,6 +2,8 @@
 
 Captures, processes, and summarizes Claude Code run transcripts for debugging and review.
 
+<img width="1007" height="188" alt="Screenshot 2026-01-13 135330" src="https://github.com/user-attachments/assets/96b3bb32-2349-4d53-ae06-1941dfe8ded0" />
+
 ## Why Snoop?
 
 **Observability.** Claude Code makes it difficult to review a specific transcript for a run. Snoop groups relevant messages by user prompt in your project ('.claude/transcripts') to make post-mortem analysis easier.
