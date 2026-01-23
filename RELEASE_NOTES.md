@@ -1,5 +1,20 @@
 # Release Notes
 
+## 1.2.9
+
+**Cache Efficiency Metric**
+
+- Add cache efficiency percentage (ce) to token breakdown
+- Shows ratio of cache read tokens to total input: `63% ce`
+- Example: `105,874 in (23 p / 38,909 cw5m / 66,942 cr / 63% ce) | ~1,125 out`
+
+## 1.2.8
+
+**Subagent Name Deduplication**
+
+- Deduplicate subagent names in status line
+- Multiple subagents of the same type now show once instead of repeating
+
 ## 1.2.7
 
 **Token Summary Cleanup**

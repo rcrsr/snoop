@@ -497,6 +497,8 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   if (tokens.cache5m > 0) breakdownParts.push(`${tokens.cache5m.toLocaleString()} cw5m`);
   if (tokens.cache1h > 0) breakdownParts.push(`${tokens.cache1h.toLocaleString()} cw1h`);
   if (tokens.cacheRead > 0) breakdownParts.push(`${tokens.cacheRead.toLocaleString()} cr`);
+  const cacheEfficiency = tokens.totalInput > 0 ? Math.round((tokens.cacheRead / tokens.totalInput) * 100) : 0;
+  if (cacheEfficiency > 0) breakdownParts.push(`${cacheEfficiency}% ce`);
   const breakdown = breakdownParts.length > 0 ? ` (${breakdownParts.join(" / ")})` : "";
   const tokenSummary = `${tokens.totalInput.toLocaleString()} in${breakdown} | ~${tokens.output.toLocaleString()} out`;
   const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort();
