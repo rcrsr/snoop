@@ -504,8 +504,9 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort();
   const agentNameMap = buildAgentNameMap(combined);
   const subagentNames = [...new Set(subagentIds.map((id) => agentNameMap.get(id) || id))].sort();
-  const subagentInfo = subagentIds.length > 0 ? ` | ${subagentIds.length} subagent${subagentIds.length > 1 ? "s" : ""} (${subagentNames.join(", ")})` : "";
-  const toolInfo = toolCount > 0 ? ` | ${toolCount} tools (${toolList})` : "";
+  const subagentCount = subagentIds.length;
+  const subagentInfo = subagentCount > 0 ? ` | ${subagentCount} si (${subagentNames.join(", ")})` : "";
+  const toolInfo = toolCount > 0 ? ` | ${toolCount} ti (${toolList})` : "";
 
   // Write latest pointer
   fs.writeFileSync(path.join(outputDir, "latest"), outputFile);

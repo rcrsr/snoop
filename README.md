@@ -63,7 +63,7 @@ claude --plugin-dir /path/to/snoop
 After each session, Snoop outputs a status line:
 
 ```
-[abc12345 | 2m 30s | 45 msgs | 150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr) | ~5,000 out | 2 subagents (Explore, claude-code-guide) | 12 tools (Read, Edit, Bash)]
+[abc12345 | 2m 30s | 45 msgs | 150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr / 53% ce) | ~5,000 out | 2 si (Explore, claude-code-guide) | 12 ti (Read, Edit, Bash)]
 ```
 
 | Field | Meaning |
@@ -76,9 +76,10 @@ After each session, Snoop outputs a status line:
 | `15,000 cw5m` | Cache write tokens (5-minute ephemeral tier) |
 | `5,000 cw1h` | Cache write tokens (1-hour ephemeral tier) |
 | `80,000 cr` | Cache read tokens |
+| `53% ce` | Cache efficiency (cache read / total input) |
 | `~5,000 out` | Estimated output tokens (tilde indicates estimate) |
-| `2 subagents (...)` | Subagent count with types (falls back to ID if unknown) |
-| `12 tools (...)` | Tool invocations with list of unique tools used |
+| `2 si (...)` | Subagent invocations with types (falls back to ID if unknown) |
+| `12 ti (...)` | Tool invocations with list of unique tools used |
 
 **Note:** `cw1h` only appears when 1-hour tier has tokens. Otherwise shows just `cw5m`.
 
