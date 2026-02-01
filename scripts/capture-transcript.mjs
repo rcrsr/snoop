@@ -115,7 +115,7 @@ async function handleUserPromptSubmit(transcriptPath, partialFile) {
   fs.writeFileSync(partialFile, output);
 }
 
-async function handleStop(transcriptPath, partialFile, outputDir) {
+async function handleStop(transcriptPath, partialFile, outputDir, projectDir) {
   const messages = await readJsonLines(transcriptPath);
   const startIndex = findLastUserPromptIndex(messages);
 
@@ -163,14 +163,13 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   if (metaInfo?.file) {
     try {
       const normalizedPath = normalizeFilePath(metaInfo.file);
-      outputFile = path.join(outputDir, normalizedPath);
+      // Custom paths are relative to project root, not transcripts dir
+      outputFile = path.join(projectDir, normalizedPath);
       isCustomPath = true;
 
       // Create subdirectories if needed
       const outputFileDir = path.dirname(outputFile);
-      if (outputFileDir !== outputDir) {
-        fs.mkdirSync(outputFileDir, { recursive: true });
-      }
+      fs.mkdirSync(outputFileDir, { recursive: true });
     } catch (err) {
       // Invalid path, fall back to default
       console.error(`Warning: ${err.message}. Using default path.`);
@@ -299,7 +298,7 @@ async function main() {
     process.exit(0);
   }
 
-  const result = await handleStop(transcriptPath, partialFile, outputDir);
+  const result = await handleStop(transcriptPath, partialFile, outputDir, projectDir);
   if (result.systemMessage) {
     console.log(JSON.stringify(result));
   }

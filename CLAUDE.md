@@ -36,7 +36,7 @@ claude --plugin-dir /path/to/snoop
 ## Meta Tags
 
 Add `<snoop:meta file="..." description="..." tags="..."/>` anywhere in conversation to:
-- **file**: Custom transcript path (relative to transcripts dir, auto-appends `.jsonl`)
+- **file**: Custom transcript path (relative to project root, auto-appends `.jsonl` if no extension)
 - **description**: Free-text description stored in meta record
 - **tags**: Comma-separated tags for categorization
 
