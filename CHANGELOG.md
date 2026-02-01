@@ -4,12 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.3] - 2026-02-01
+
+### Fixed
+
+- Always use `.jsonl` extension for transcripts (replace any user-provided extension)
+
 ## [1.4.2] - 2026-01-31
 
 ### Changed
 
 - Meta tag file paths are now relative to project root (not transcripts dir)
-- Preserve original file extension; only append `.jsonl` if no extension present
 
 ## [1.4.1] - 2026-01-31
 

@@ -98,9 +98,9 @@ export function scanForMetaTags(messages) {
 /**
  * Normalize and validate the file path
  * - Support subdirectories
- * - Auto-append .jsonl only if no extension present
+ * - Always use .jsonl extension (replace any existing extension)
  * - Sanitize: reject absolute paths and path traversal
- * @returns {string} Normalized relative path
+ * @returns {string} Normalized relative path with .jsonl extension
  * @throws {Error} If path is invalid
  */
 export function normalizeFilePath(filePath) {
@@ -115,13 +115,10 @@ export function normalizeFilePath(filePath) {
     throw new Error(`Invalid meta file path: path traversal not allowed (${filePath})`);
   }
 
-  // Auto-append .jsonl only if no extension present
+  // Always use .jsonl extension - strip any existing extension and add .jsonl
   const ext = path.extname(normalized);
-  if (!ext) {
-    return normalized + ".jsonl";
-  }
-
-  return normalized;
+  const basePath = ext ? normalized.slice(0, -ext.length) : normalized;
+  return basePath + ".jsonl";
 }
 
 /**
