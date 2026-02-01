@@ -2,353 +2,29 @@
 /**
  * Dual-purpose hook for capturing run transcripts.
  * - UserPromptSubmit: Detects ESC interrupts, saves partial transcripts
- * - Stop: Merges partials, captures complete transcript
+ * - Stop: Merges partials, captures complete transcript with meta record
  */
 
 import * as fs from "fs";
 import * as path from "path";
-import * as readline from "readline";
+
+import { readJsonLines, calculateTiming } from "./lib/helpers.mjs";
+import {
+  findLastUserPromptIndex,
+  hasToolUse,
+  shouldSkipMessage,
+  streamlineMessage,
+  countToolUses,
+  getUniqueTools,
+  countEscInterrupts,
+  buildAgentNameMap,
+} from "./lib/messages.mjs";
+import { calculateTokenUsage } from "./lib/tokens.mjs";
+import { scanForMetaTags, normalizeFilePath, buildMetaRecord } from "./lib/meta.mjs";
 
 // -----------------------------------------------------------------------------
-// Helpers
+// Subagent Loading
 // -----------------------------------------------------------------------------
-
-async function readJsonLines(filePath) {
-  const lines = [];
-  const fileStream = fs.createReadStream(filePath);
-  const rl = readline.createInterface({
-    input: fileStream,
-    crlfDelay: Infinity,
-  });
-  for await (const line of rl) {
-    if (line.trim()) {
-      try {
-        lines.push(JSON.parse(line));
-      } catch {
-        // Skip malformed lines
-      }
-    }
-  }
-  return lines;
-}
-
-function isExternalUserPrompt(msg) {
-  return (
-    msg.type === "user" &&
-    msg.userType === "external" &&
-    typeof msg.message?.content === "string"
-  );
-}
-
-function findLastUserPromptIndex(messages) {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (isExternalUserPrompt(messages[i])) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-function hasToolUse(msg) {
-  if (msg.type !== "assistant" || !Array.isArray(msg.message?.content)) {
-    return false;
-  }
-  return msg.message.content.some((block) => block.type === "tool_use");
-}
-
-function cleanContentBlock(block) {
-  switch (block.type) {
-    case "thinking":
-      return { type: block.type, thinking: block.thinking };
-    case "tool_use":
-      return { type: block.type, id: block.id, name: block.name, input: block.input };
-    case "tool_result": {
-      let content = block.content;
-      if (typeof content === "string" && content.length > 500) {
-        content = content.slice(0, 500) + "...";
-      }
-      return { type: block.type, tool_use_id: block.tool_use_id, content };
-    }
-    default:
-      return block;
-  }
-}
-
-function shouldSkipMessage(msg) {
-  return msg.type === "file-history-snapshot" || msg.type === "summary";
-}
-
-function streamlineMessage(msg) {
-  const result = {
-    type: msg.type,
-    timestamp: msg.timestamp,
-    uuid: msg.uuid,
-    parentUuid: msg.parentUuid,
-  };
-  if (msg.requestId) {
-    result.requestId = msg.requestId;
-  }
-  if (msg.message) {
-    const content = msg.message.content;
-    result.message = {
-      role: msg.message.role,
-      content: Array.isArray(content) ? content.map(cleanContentBlock) : content,
-    };
-    if (msg.message.usage) {
-      result.message.usage = {
-        input: msg.message.usage.input_tokens || 0,
-        output: msg.message.usage.output_tokens || 0,
-        cacheCreate: msg.message.usage.cache_creation_input_tokens || 0,
-        cacheRead: msg.message.usage.cache_read_input_tokens || 0,
-        cache5m: msg.message.usage.cache_creation?.ephemeral_5m_input_tokens || 0,
-        cache1h: msg.message.usage.cache_creation?.ephemeral_1h_input_tokens || 0,
-      };
-    }
-  }
-  // Capture toolUseResult for subagent token counts and name mapping
-  if (msg.toolUseResult?.agentId) {
-    result.toolUseResult = {
-      agentId: msg.toolUseResult.agentId,
-    };
-    if (msg.toolUseResult.usage) {
-      result.toolUseResult.usage = {
-        input: msg.toolUseResult.usage.input_tokens || 0,
-        output: msg.toolUseResult.usage.output_tokens || 0,
-        cacheCreate: msg.toolUseResult.usage.cache_creation_input_tokens || 0,
-        cacheRead: msg.toolUseResult.usage.cache_read_input_tokens || 0,
-        cache5m: msg.toolUseResult.usage.cache_creation?.ephemeral_5m_input_tokens || 0,
-        cache1h: msg.toolUseResult.usage.cache_creation?.ephemeral_1h_input_tokens || 0,
-      };
-    }
-  }
-  return result;
-}
-
-function formatDuration(seconds) {
-  if (seconds >= 60) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}m ${secs}s`;
-  }
-  return `${seconds}s`;
-}
-
-function calculateDuration(messages) {
-  const timestamps = messages
-    .map((m) => m.timestamp)
-    .filter((t) => !!t)
-    .map((t) => new Date(t).getTime())
-    .sort((a, b) => a - b);
-  if (timestamps.length < 2) return "unknown";
-  try {
-    const seconds = Math.floor((timestamps[timestamps.length - 1] - timestamps[0]) / 1000);
-    return formatDuration(seconds);
-  } catch {
-    return "unknown";
-  }
-}
-
-function countToolUses(messages) {
-  let count = 0;
-  for (const msg of messages) {
-    if ("message" in msg && Array.isArray(msg.message?.content)) {
-      count += msg.message.content.filter((b) => b.type === "tool_use").length;
-    }
-  }
-  return count;
-}
-
-function getUniqueTools(messages) {
-  const tools = new Set();
-  for (const msg of messages) {
-    if ("message" in msg && Array.isArray(msg.message?.content)) {
-      for (const block of msg.message.content) {
-        if (block.type === "tool_use" && block.name) {
-          tools.add(block.name);
-        }
-      }
-    }
-  }
-  return Array.from(tools).sort();
-}
-
-function countEscInterrupts(messages) {
-  return messages.filter((m) => m.type === "interrupt").length;
-}
-
-function buildAgentNameMap(messages) {
-  // Map agentId -> subagent_type by linking Task tool_use to toolUseResult
-  const toolUseTypes = new Map(); // tool_use.id -> subagent_type
-  const agentNames = new Map(); // agentId -> subagent_type
-
-  // First pass: collect Task tool_use blocks
-  for (const msg of messages) {
-    if (msg.type !== "assistant" || !Array.isArray(msg.message?.content)) continue;
-    for (const block of msg.message.content) {
-      if (block.type === "tool_use" && block.name === "Task" && block.input?.subagent_type) {
-        toolUseTypes.set(block.id, block.input.subagent_type);
-      }
-    }
-  }
-
-  // Second pass: match toolUseResult.agentId to tool_result.tool_use_id
-  for (const msg of messages) {
-    if (msg.type !== "user" || !msg.toolUseResult?.agentId) continue;
-    const agentId = msg.toolUseResult.agentId;
-    if (!Array.isArray(msg.message?.content)) continue;
-
-    // Find the Task tool_result in this message
-    for (const block of msg.message.content) {
-      if (block.type === "tool_result" && toolUseTypes.has(block.tool_use_id)) {
-        agentNames.set("agent-" + agentId, toolUseTypes.get(block.tool_use_id));
-        break;
-      }
-    }
-  }
-
-  return agentNames;
-}
-
-function getContentLength(block) {
-  if (!block) return 0;
-  switch (block.type) {
-    case "thinking":
-      return (block.thinking || "").length;
-    case "text":
-      return (block.text || "").length;
-    case "tool_use":
-      return JSON.stringify(block.input || {}).length;
-    case "tool_result":
-      return (typeof block.content === "string" ? block.content : JSON.stringify(block.content || "")).length;
-    default:
-      return 0;
-  }
-}
-
-function estimateTokensFromContent(messages) {
-  // Estimate tokens by counting content characters / 4
-  // Dedupe by uuid to avoid counting streaming chunks multiple times
-  const seen = new Set();
-  let inputChars = 0;
-  let outputChars = 0;
-
-  for (const msg of messages) {
-    if (msg.uuid && seen.has(msg.uuid)) continue;
-    if (msg.uuid) seen.add(msg.uuid);
-
-    const content = msg.message?.content;
-    if (!content) continue;
-
-    if (msg.type === "assistant") {
-      // Output: thinking, text, tool_use from assistant
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          if (["thinking", "text", "tool_use"].includes(block.type)) {
-            outputChars += getContentLength(block);
-          }
-        }
-      }
-    } else if (msg.type === "user") {
-      // Input: user prompt text and tool_result blocks
-      if (typeof content === "string") {
-        inputChars += content.length;
-      } else if (Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type === "tool_result") {
-            inputChars += getContentLength(block);
-          } else if (block.type === "text") {
-            inputChars += (block.text || "").length;
-          }
-        }
-      }
-    }
-  }
-
-  return {
-    input: Math.ceil(inputChars / 4),
-    output: Math.ceil(outputChars / 4),
-  };
-}
-
-function calculateTokenUsage(messages) {
-  // Strategy:
-  // 1. Input tokens: API-reported (reliable, includes system prompt + cache)
-  // 2. Output tokens: toolUseResult.usage (accurate for subagents) + content estimate for main
-  //
-  // Why: Streaming output_tokens are unreliable (often 10x under-reported).
-  // But toolUseResult contains accurate final counts for subagent tasks.
-  //
-  // Sort by timestamp: subagent messages may be appended at array end but have
-  // earlier timestamps. Sorting ensures byRequest.set() captures final cumulative values.
-
-  const sorted = [...messages].sort((a, b) => {
-    const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-    const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-    return ta - tb;
-  });
-
-  const byRequest = new Map();
-  const toolUseResults = [];
-
-  for (const msg of sorted) {
-    // Main conversation only - subagent tokens come from toolUseResult
-    if (msg.requestId && msg.message?.usage && !msg.subagent) {
-      byRequest.set(msg.requestId, msg.message.usage);
-    }
-    // Collect toolUseResult from user messages (Task tool completions)
-    if (msg.toolUseResult?.usage) {
-      toolUseResults.push(msg.toolUseResult.usage);
-    }
-  }
-
-  let totalInput = 0;
-  let totalCacheCreate = 0;
-  let totalCacheRead = 0;
-  let totalCache5m = 0;
-  let totalCache1h = 0;
-
-  for (const usage of byRequest.values()) {
-    totalInput += usage.input ?? usage.input_tokens ?? 0;
-    totalCacheCreate += usage.cacheCreate ?? usage.cache_creation_input_tokens ?? 0;
-    totalCacheRead += usage.cacheRead ?? usage.cache_read_input_tokens ?? 0;
-    totalCache5m += usage.cache5m ?? usage.cache_creation?.ephemeral_5m_input_tokens ?? 0;
-    totalCache1h += usage.cache1h ?? usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
-  }
-
-  // Output tokens: prefer toolUseResult (accurate), fallback to content estimate
-  let totalOutput = 0;
-  if (toolUseResults.length > 0) {
-    // Use accurate counts from toolUseResult
-    for (const usage of toolUseResults) {
-      totalOutput += usage.output ?? usage.output_tokens ?? 0;
-      // Also add subagent input/cache to totals
-      totalInput += usage.input ?? usage.input_tokens ?? 0;
-      totalCacheCreate += usage.cacheCreate ?? usage.cache_creation_input_tokens ?? 0;
-      totalCacheRead += usage.cacheRead ?? usage.cache_read_input_tokens ?? 0;
-      totalCache5m += usage.cache5m ?? usage.cache_creation?.ephemeral_5m_input_tokens ?? 0;
-      totalCache1h += usage.cache1h ?? usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
-    }
-    // Add content estimate for main conversation (non-subagent messages)
-    const mainMessages = messages.filter((m) => !m.subagent);
-    const mainEstimate = estimateTokensFromContent(mainMessages);
-    totalOutput += mainEstimate.output;
-  } else {
-    // No subagents, use content estimate for everything
-    const estimated = estimateTokensFromContent(messages);
-    totalOutput = estimated.output;
-  }
-
-  return {
-    input: totalInput,
-    output: totalOutput,
-    cacheCreate: totalCacheCreate,
-    cacheRead: totalCacheRead,
-    cache5m: totalCache5m,
-    cache1h: totalCache1h,
-    totalInput: totalInput + totalCacheCreate + totalCacheRead,
-    apiCalls: byRequest.size,
-  };
-}
 
 async function getSubagentFiles(transcriptPath) {
   // Transcript path: /path/to/session-id.jsonl
@@ -360,7 +36,8 @@ async function getSubagentFiles(transcriptPath) {
     return [];
   }
 
-  return fs.readdirSync(subagentsDir)
+  return fs
+    .readdirSync(subagentsDir)
     .filter((f) => f.endsWith(".jsonl"))
     .map((f) => path.join(subagentsDir, f));
 }
@@ -446,11 +123,10 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
     return { decision: "approve", systemMessage: "" };
   }
 
-  // Generate output filename
-  const randomId = Array.from({ length: 8 }, () =>
+  // Generate transcript ID
+  const transcriptId = Array.from({ length: 8 }, () =>
     "abcdefghijklmnopqrstuvwxyz0123456789".charAt(Math.floor(Math.random() * 36))
   ).join("");
-  const outputFile = path.join(outputDir, `${randomId}.jsonl`);
 
   // Load any existing partial
   let combined = [];
@@ -478,19 +154,91 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   });
   combined.push(...subagentMessages);
 
-  // Write output
-  const output = combined.map((m) => JSON.stringify(m)).join("\n") + "\n";
-  fs.writeFileSync(outputFile, output);
+  // Scan for meta tags (last one wins)
+  const metaInfo = scanForMetaTags(combined);
 
-  // Calculate stats (include subagent tokens)
+  // Determine output path
+  let outputFile;
+  let isCustomPath = false;
+  if (metaInfo?.file) {
+    try {
+      const normalizedPath = normalizeFilePath(metaInfo.file);
+      outputFile = path.join(outputDir, normalizedPath);
+      isCustomPath = true;
+
+      // Create subdirectories if needed
+      const outputFileDir = path.dirname(outputFile);
+      if (outputFileDir !== outputDir) {
+        fs.mkdirSync(outputFileDir, { recursive: true });
+      }
+    } catch (err) {
+      // Invalid path, fall back to default
+      console.error(`Warning: ${err.message}. Using default path.`);
+      outputFile = path.join(outputDir, `${transcriptId}.jsonl`);
+    }
+  } else {
+    outputFile = path.join(outputDir, `${transcriptId}.jsonl`);
+  }
+
+  // Calculate stats
+  const timing = calculateTiming(combined);
   const msgCount = combined.length;
   const toolCount = countToolUses(combined);
   const uniqueTools = getUniqueTools(combined);
-  const duration = calculateDuration(combined);
   const escCount = countEscInterrupts(combined);
   const tokens = calculateTokenUsage(combined);
+  const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort();
+  const agentNameMap = buildAgentNameMap(combined);
+  const subagentNames = [...new Set(subagentIds.map((id) => agentNameMap.get(id) || id))].sort();
+
+  // Build meta record
+  const metaRecord = buildMetaRecord(
+    {
+      transcriptId,
+      timing,
+      messageCount: msgCount,
+      toolCount,
+      tools: uniqueTools,
+      escInterrupts: escCount,
+      tokens,
+      subagents: subagentNames,
+    },
+    metaInfo
+  );
+
+  // Write output (meta record first, then messages)
+  const outputLines = [JSON.stringify(metaRecord), ...combined.map((m) => JSON.stringify(m))];
+  fs.writeFileSync(outputFile, outputLines.join("\n") + "\n");
+
+  // Only update latest pointer for default-named transcripts
+  if (!isCustomPath) {
+    fs.writeFileSync(path.join(outputDir, "latest"), outputFile);
+  }
+
+  // Cleanup old transcripts (keep last 10) - only prune files directly in outputDir
+  if (!isCustomPath) {
+    const files = fs
+      .readdirSync(outputDir)
+      .filter((f) => {
+        const fullPath = path.join(outputDir, f);
+        return (
+          f.endsWith(".jsonl") &&
+          !f.startsWith(".") &&
+          fs.statSync(fullPath).isFile() // Not a directory
+        );
+      })
+      .map((f) => ({ name: f, time: fs.statSync(path.join(outputDir, f)).mtime }))
+      .sort((a, b) => b.time.getTime() - a.time.getTime());
+
+    for (const file of files.slice(10)) {
+      fs.unlinkSync(path.join(outputDir, file.name));
+    }
+  }
+
+  // Build status line
   const interrupted = escCount > 0 ? `⚠️ ${escCount}x ESC | ` : "";
   const toolList = uniqueTools.join(", ");
+
   // Build token breakdown, skipping 0 values
   const breakdownParts = [];
   if (tokens.input > 0) breakdownParts.push(`${tokens.input.toLocaleString()} p`);
@@ -501,30 +249,17 @@ async function handleStop(transcriptPath, partialFile, outputDir) {
   if (cacheEfficiency > 0) breakdownParts.push(`${cacheEfficiency}% ce`);
   const breakdown = breakdownParts.length > 0 ? ` (${breakdownParts.join(" / ")})` : "";
   const tokenSummary = `${tokens.totalInput.toLocaleString()} in${breakdown} | ~${tokens.output.toLocaleString()} out`;
-  const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort();
-  const agentNameMap = buildAgentNameMap(combined);
-  const subagentNames = [...new Set(subagentIds.map((id) => agentNameMap.get(id) || id))].sort();
+
   const subagentCount = subagentIds.length;
   const subagentInfo = subagentCount > 0 ? ` | ${subagentCount} si (${subagentNames.join(", ")})` : "";
   const toolInfo = toolCount > 0 ? ` | ${toolCount} ti (${toolList})` : "";
 
-  // Write latest pointer
-  fs.writeFileSync(path.join(outputDir, "latest"), outputFile);
-
-  // Cleanup old transcripts (keep last 10)
-  const files = fs
-    .readdirSync(outputDir)
-    .filter((f) => f.endsWith(".jsonl") && !f.startsWith("."))
-    .map((f) => ({ name: f, time: fs.statSync(path.join(outputDir, f)).mtime }))
-    .sort((a, b) => b.time.getTime() - a.time.getTime());
-
-  for (const file of files.slice(10)) {
-    fs.unlinkSync(path.join(outputDir, file.name));
-  }
+  // Include custom path indicator if applicable
+  const pathIndicator = isCustomPath ? ` → ${metaInfo.file}` : "";
 
   return {
     decision: "approve",
-    systemMessage: `[${randomId} | ${duration} | ${interrupted}${msgCount} msgs | ${tokenSummary}${subagentInfo}${toolInfo}]`,
+    systemMessage: `[${transcriptId}${pathIndicator} | ${timing.durationFormatted} | ${interrupted}${msgCount} msgs | ${tokenSummary}${subagentInfo}${toolInfo}]`,
   };
 }
 

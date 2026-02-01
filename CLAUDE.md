@@ -17,7 +17,11 @@ claude --plugin-dir /path/to/snoop
 
 | Path | Purpose |
 |------|---------|
-| `scripts/capture-transcript.mjs` | Core hook handler. Routes via `hook_event_name` env var |
+| `scripts/capture-transcript.mjs` | Entry point + hook handlers |
+| `scripts/lib/helpers.mjs` | File I/O, duration formatting |
+| `scripts/lib/messages.mjs` | Message filtering, streamlining, analysis |
+| `scripts/lib/tokens.mjs` | Token calculation and estimation |
+| `scripts/lib/meta.mjs` | Meta tag scanning and parsing |
 | `hooks/hooks.json` | Binds `UserPromptSubmit` and `Stop` events |
 | `agents/transcript-reviewer.md` | Post-mortem analysis agent (haiku model) |
 | `commands/review.md` | `/snoop:review` entry point |
@@ -27,18 +31,46 @@ claude --plugin-dir /path/to/snoop
 | Event | Action |
 |-------|--------|
 | `UserPromptSubmit` | Detect ESC interrupt (pending `tool_use`), save partial transcript |
-| `Stop` | Merge partials, write final JSONL, update `latest` pointer, prune to 10 files |
+| `Stop` | Merge partials, write meta record + messages, update `latest` pointer, prune to 10 files |
+
+## Meta Tags
+
+Add `<snoop:meta file="..." description="..." tags="..."/>` anywhere in conversation to:
+- **file**: Custom transcript path (relative to transcripts dir, auto-appends `.jsonl`)
+- **description**: Free-text description stored in meta record
+- **tags**: Comma-separated tags for categorization
+
+Multiple tags: last one wins. Custom paths skip `latest` pointer and pruning.
 
 ## When Editing
 
-- **Status line format**: modify `tokenSummary`, `subagentInfo`, `toolInfo` in `handleStop()`
-- **Token calculation**: see `calculateTokenUsage()` - input from API, output estimated
-- **Message filtering**: `streamlineMessage()` controls what fields are captured
-- **Subagent loading**: `loadSubagentMessages()` reads from Claude Code's internal logs
+- **Status line format**: modify token/subagent/tool summary in `handleStop()`
+- **Token calculation**: `lib/tokens.mjs` - input from API, output estimated
+- **Message filtering**: `lib/messages.mjs` - `streamlineMessage()` controls captured fields
+- **Meta tag parsing**: `lib/meta.mjs` - `scanForMetaTags()` extracts tag attributes
+- **Subagent loading**: `loadSubagentMessages()` in main script
 
 ## Transcript Schema
 
-JSONL with one message per line:
+JSONL with meta record first, then one message per line:
+
+### Meta Record (first line)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Always `"meta"` |
+| `transcriptId` | string | 8-char random ID |
+| `timing` | object | `start`, `end` (ISO), `duration` (formatted) |
+| `messageCount` | number | Total messages |
+| `toolCount` | number | Total tool invocations |
+| `tools` | array | Unique tool names used |
+| `escInterrupts` | number | ESC interrupt count |
+| `tokens` | object | Token usage breakdown |
+| `subagents` | array | Subagent type names (if any) |
+| `description` | string | From meta tag (optional) |
+| `tags` | array | From meta tag (optional) |
+
+### Message Records
 
 | Field | Type | Description |
 |-------|------|-------------|

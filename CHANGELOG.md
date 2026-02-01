@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.0] - 2026-01-31
+
+### Added
+
+- Meta tag support: `<snoop:meta file="..." description="..." tags="..."/>`
+- Meta record as first line of transcript with summary stats
+- Custom transcript paths with subdirectory support
+- Description and tags fields in meta record
+
+### Changed
+
+- Modularize script into `lib/` directory:
+  - `lib/helpers.mjs` - File I/O, duration formatting
+  - `lib/messages.mjs` - Message filtering, streamlining, analysis
+  - `lib/tokens.mjs` - Token calculation and estimation
+  - `lib/meta.mjs` - Meta tag scanning and parsing
+- Pruning only affects default-named transcripts (not subdirs)
+- Latest pointer only updated for default-named transcripts
+- Status line shows custom path indicator when meta tag specifies file
+
 ## [1.3.0] - 2026-01-27
 
 ### Changed
