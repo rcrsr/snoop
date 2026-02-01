@@ -25,6 +25,18 @@ function parseMetaAttributes(attrString) {
 }
 
 /**
+ * Unescape JSON string escape sequences
+ * Handles: \" -> ", \\ -> \, \n -> newline, \t -> tab
+ */
+function unescapeJsonString(str) {
+  return str
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\\\/g, '\\');
+}
+
+/**
  * Extract text content from a message for scanning
  */
 function extractTextContent(msg) {
@@ -44,10 +56,12 @@ function extractTextContent(msg) {
   if (Array.isArray(content)) {
     for (const block of content) {
       if (block.type === "text" && block.text) {
-        texts.push(block.text);
+        // Unescape in case LLM shows JSON output containing the meta tag
+        texts.push(unescapeJsonString(block.text));
       }
       if (block.type === "tool_result" && typeof block.content === "string") {
-        texts.push(block.content);
+        // Unescape JSON strings so meta tags with escaped quotes can be matched
+        texts.push(unescapeJsonString(block.content));
       }
     }
   }

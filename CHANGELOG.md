@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.1] - 2026-01-31
+
+### Fixed
+
+- Unescape JSON strings in meta tag scanning to match tags with escaped quotes
+
 ## [1.4.0] - 2026-01-31
 
 ### Added
