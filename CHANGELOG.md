@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.4] - 2026-02-01
+
+### Fixed
+
+- Skip `progress` messages (heartbeat entries with no content)
+
 ## [1.4.3] - 2026-02-01
 
 ### Fixed

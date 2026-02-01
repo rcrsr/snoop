@@ -60,7 +60,11 @@ export function cleanContentBlock(block) {
  * Check if message should be skipped from transcript
  */
 export function shouldSkipMessage(msg) {
-  return msg.type === "file-history-snapshot" || msg.type === "summary";
+  return (
+    msg.type === "file-history-snapshot" ||
+    msg.type === "summary" ||
+    msg.type === "progress"
+  );
 }
 
 /**
