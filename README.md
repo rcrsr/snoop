@@ -63,7 +63,7 @@ claude --plugin-dir /path/to/snoop
 After each session, Snoop outputs a status line:
 
 ```
-[abc12345 | 2m 30s | 45 msgs | 150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr / 53% ce) | ~5,000 out | 2 si (Explore, claude-code-guide) | 12 ti (Read, Edit, Bash)]
+[snoop] abc12345 | 2m 30s | 45 msgs | 150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr / 53% ce) | 5,000 out | 2 si (Explore, claude-code-guide) | 12 ti (Read, Edit, Bash)
 ```
 
 | Field | Meaning |
@@ -77,7 +77,7 @@ After each session, Snoop outputs a status line:
 | `5,000 cw1h` | Cache write tokens (1-hour ephemeral tier) |
 | `80,000 cr` | Cache read tokens |
 | `53% ce` | Cache efficiency (cache read / total input) |
-| `~5,000 out` | Estimated output tokens (tilde indicates estimate) |
+| `5,000 out` | Output tokens |
 | `2 si (...)` | Subagent invocations with types (falls back to ID if unknown) |
 | `12 ti (...)` | Tool invocations with list of unique tools used |
 
@@ -90,16 +90,24 @@ After each session, Snoop outputs a status line:
 
 ## Token Counting
 
-| Type | Source | Reliability |
-|------|--------|-------------|
-| Input | API-reported | Reliable (includes system prompt, history, cache) |
-| Output | Hybrid | Estimated (see below) |
+All token counts are API-reported. Main conversation usage comes from streaming message chunks (last chunk per request carries the cumulative total). Subagent usage comes from `toolUseResult.usage`.
 
-**Output token strategy:**
-- Subagents: `toolUseResult.usage.output_tokens` (accurate final count)
-- Main conversation: content estimate (chars/4)
+## Meta Tags
 
-**Why estimate output?** Claude Code logs include cumulative output tokens during streaming, but the final chunk isn't always captured. The `toolUseResult` field contains correct totals for subagents; main conversation falls back to content estimation.
+Add `<snoop:meta file="..." description="..." tags="..."/>` anywhere in conversation to customize transcript output.
+
+| Attribute | Effect |
+|-----------|--------|
+| `file` | Custom transcript path (relative to project root, always `.jsonl` extension) |
+| `description` | Free-text description stored in meta record |
+| `tags` | Comma-separated tags for categorization |
+
+When multiple meta tags appear, the last one wins. Custom paths skip `latest` pointer and pruning.
+
+**Example:**
+```
+<snoop:meta file="transcripts/auth-refactor" description="OAuth2 migration" tags="auth,refactor"/>
+```
 
 ## Commands
 
