@@ -160,11 +160,11 @@ export function buildAgentNameMap(messages) {
   const toolUseTypes = new Map(); // tool_use.id -> subagent_type
   const agentNames = new Map(); // agentId -> subagent_type
 
-  // First pass: collect Task tool_use blocks
+  // First pass: collect Agent/Task tool_use blocks
   for (const msg of messages) {
     if (msg.type !== "assistant" || !Array.isArray(msg.message?.content)) continue;
     for (const block of msg.message.content) {
-      if (block.type === "tool_use" && block.name === "Task" && block.input?.subagent_type) {
+      if (block.type === "tool_use" && (block.name === "Agent" || block.name === "Task") && block.input?.subagent_type) {
         toolUseTypes.set(block.id, block.input.subagent_type);
       }
     }

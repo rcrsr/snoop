@@ -1,5 +1,6 @@
 # Transcripts (generated output)
 .claude/transcripts/
+.claude/conduct.json
 
 # Node
 node_modules/

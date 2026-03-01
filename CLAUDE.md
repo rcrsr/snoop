@@ -20,7 +20,7 @@ claude --plugin-dir /path/to/snoop
 | `scripts/capture-transcript.mjs` | Entry point + hook handlers |
 | `scripts/lib/helpers.mjs` | File I/O, duration formatting |
 | `scripts/lib/messages.mjs` | Message filtering, streamlining, analysis |
-| `scripts/lib/tokens.mjs` | Token calculation and estimation |
+| `scripts/lib/tokens.mjs` | Token calculation from API-reported usage |
 | `scripts/lib/meta.mjs` | Meta tag scanning and parsing |
 | `hooks/hooks.json` | Binds `UserPromptSubmit` and `Stop` events |
 | `agents/transcript-reviewer.md` | Post-mortem analysis agent (haiku model) |
@@ -45,7 +45,7 @@ Multiple tags: last one wins. Custom paths skip `latest` pointer and pruning.
 ## When Editing
 
 - **Status line format**: modify token/subagent/tool summary in `handleStop()`
-- **Token calculation**: `lib/tokens.mjs` - input from API, output estimated
+- **Token calculation**: `lib/tokens.mjs` - all counts from API-reported usage
 - **Message filtering**: `lib/messages.mjs` - `streamlineMessage()` controls captured fields
 - **Meta tag parsing**: `lib/meta.mjs` - `scanForMetaTags()` extracts tag attributes
 - **Subagent loading**: `loadSubagentMessages()` in main script

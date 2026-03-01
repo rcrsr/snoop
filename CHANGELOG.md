@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.5] - 2026-03-01
+
+### Fixed
+
+- Resolve subagent names after Claude Code renamed `Task` tool to `Agent`
+
+### Changed
+
+- Use API-reported output tokens instead of content-based estimation
+- Status line format: remove outer brackets, add `[snoop]` prefix
+
+### Removed
+
+- `getContentLength` and `estimateTokensFromContent` from `tokens.mjs`
+
 ## [1.4.4] - 2026-02-01
 
 ### Fixed

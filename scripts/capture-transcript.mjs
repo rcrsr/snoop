@@ -247,7 +247,7 @@ async function handleStop(transcriptPath, partialFile, outputDir, projectDir) {
   const cacheEfficiency = tokens.totalInput > 0 ? Math.round((tokens.cacheRead / tokens.totalInput) * 100) : 0;
   if (cacheEfficiency > 0) breakdownParts.push(`${cacheEfficiency}% ce`);
   const breakdown = breakdownParts.length > 0 ? ` (${breakdownParts.join(" / ")})` : "";
-  const tokenSummary = `${tokens.totalInput.toLocaleString()} in${breakdown} | ~${tokens.output.toLocaleString()} out`;
+  const tokenSummary = `${tokens.totalInput.toLocaleString()} in${breakdown} | ${tokens.output.toLocaleString()} out`;
 
   const subagentCount = subagentIds.length;
   const subagentInfo = subagentCount > 0 ? ` | ${subagentCount} si (${subagentNames.join(", ")})` : "";
@@ -258,7 +258,7 @@ async function handleStop(transcriptPath, partialFile, outputDir, projectDir) {
 
   return {
     decision: "approve",
-    systemMessage: `[${transcriptId}${pathIndicator} | ${timing.durationFormatted} | ${interrupted}${msgCount} msgs | ${tokenSummary}${subagentInfo}${toolInfo}]`,
+    systemMessage: `[snoop] ${transcriptId}${pathIndicator} | ${timing.durationFormatted} | ${interrupted}${msgCount} msgs | ${tokenSummary}${subagentInfo}${toolInfo}`,
   };
 }
 
