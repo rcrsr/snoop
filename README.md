@@ -94,20 +94,38 @@ All token counts are API-reported. Main conversation usage comes from streaming 
 
 ## Meta Tags
 
-Add `<snoop:meta file="..." description="..." tags="..."/>` anywhere in conversation to customize transcript output.
+Add `<snoop:meta key="value" .../>` anywhere in conversation to enrich the transcript meta record.
+
+**Reserved attributes** (special handling):
 
 | Attribute | Effect |
 |-----------|--------|
 | `file` | Custom transcript path (relative to project root, always `.jsonl` extension) |
 | `description` | Free-text description stored in meta record |
-| `tags` | Comma-separated tags for categorization |
+| `tags` | Comma-separated tags, stored as array |
 
-When multiple meta tags appear, the last one wins. Custom paths skip `latest` pointer and pruning.
+All other attributes pass through as raw strings. Built-in record keys (`type`, `transcriptId`, `timing`, `tokens`, etc.) cannot be overwritten.
+
+When multiple meta tags appear, the last one wins (no merging). Custom paths skip `latest` pointer and pruning.
 
 **Example:**
 ```
-<snoop:meta file="transcripts/auth-refactor" description="OAuth2 migration" tags="auth,refactor"/>
+<snoop:meta file="transcripts/auth-refactor" description="OAuth2 migration" tags="auth,refactor" initiative="AUTH-42"/>
 ```
+
+## Context File
+
+Place `.claude/snoop-context.json` in your project to set default meta values for all transcripts:
+
+```json
+{
+  "project": "my-app",
+  "team": "platform",
+  "tags": "backend,api"
+}
+```
+
+Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## Commands
 

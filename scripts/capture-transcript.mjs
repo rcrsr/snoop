@@ -20,7 +20,7 @@ import {
   buildAgentNameMap,
 } from "./lib/messages.mjs";
 import { calculateTokenUsage } from "./lib/tokens.mjs";
-import { scanForMetaTags, normalizeFilePath, buildMetaRecord } from "./lib/meta.mjs";
+import { scanForMetaTags, normalizeFilePath, buildMetaRecord, loadSnoopContext } from "./lib/meta.mjs";
 
 // -----------------------------------------------------------------------------
 // Subagent Loading
@@ -154,8 +154,9 @@ async function handleStop(transcriptPath, partialFile, outputDir, projectDir) {
   });
   combined.push(...subagentMessages);
 
-  // Scan for meta tags (last one wins)
+  // Scan for meta tags (last one wins) and load context file
   const metaInfo = scanForMetaTags(combined);
+  const snoopContext = loadSnoopContext(projectDir);
 
   // Determine output path
   let outputFile;
@@ -202,7 +203,8 @@ async function handleStop(transcriptPath, partialFile, outputDir, projectDir) {
       tokens,
       subagents: subagentNames,
     },
-    metaInfo
+    metaInfo,
+    snoopContext
   );
 
   // Write output (meta record first, then messages)

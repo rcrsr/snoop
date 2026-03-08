@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.5.0] - 2026-03-08
+
+### Added
+
+- Dynamic meta tag attributes: any `key="value"` beyond reserved keys passes through to meta record
+- Context file support: `.claude/snoop-context.json` sets default meta values for all transcripts
+- Built-in key protection: `type`, `transcriptId`, `timing`, `tokens`, etc. cannot be overwritten
+
+### Changed
+
+- `parseMetaAttributes` accepts all attributes, not just `file`/`description`/`tags`
+- `buildMetaRecord` merges context file (layer 1) then meta tag (layer 2) with reserved key guards
+
 ## [1.4.5] - 2026-03-01
 
 ### Fixed

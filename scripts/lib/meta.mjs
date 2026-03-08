@@ -2,14 +2,14 @@
  * Meta tag scanning and parsing for custom transcript naming
  */
 
+import * as fs from "fs";
 import * as path from "path";
 
-// Pattern: <snoop:meta file="..." description="..." tags="..."/>
+// Pattern: <snoop:meta key="value" .../>
 const SNOOP_META_PATTERN = /<snoop:meta\s+([^>]+)\/>/g;
 
 /**
- * Extract attributes from a snoop:meta tag attribute string
- * Parses: file="value" description="value" tags="value"
+ * Extract all key="value" attributes from a snoop:meta tag
  */
 function parseMetaAttributes(attrString) {
   const result = {};
@@ -17,9 +17,7 @@ function parseMetaAttributes(attrString) {
   let match;
   while ((match = attrPattern.exec(attrString)) !== null) {
     const [, name, value] = match;
-    if (name === "file" || name === "description" || name === "tags") {
-      result[name] = value;
-    }
+    result[name] = value;
   }
   return result;
 }
@@ -72,7 +70,7 @@ function extractTextContent(msg) {
 /**
  * Scan all message content for snoop:meta tags
  * Returns the last occurrence (last wins)
- * @returns {null | { file?: string, description?: string, tags?: string }}
+ * @returns {null | { file?: string, description?: string, tags?: string, [key: string]: string }}
  */
 export function scanForMetaTags(messages) {
   let lastMeta = null;
@@ -122,12 +120,46 @@ export function normalizeFilePath(filePath) {
 }
 
 /**
+ * Load context from .claude/snoop-context.json if it exists.
+ * The "file" key is excluded (reserved for in-conversation meta tags only).
+ * @param {string} projectDir - Project root directory
+ * @returns {object} Context key-value pairs, or empty object
+ */
+export function loadSnoopContext(projectDir) {
+  const contextPath = path.join(projectDir, ".claude", "snoop-context.json");
+  if (!fs.existsSync(contextPath)) return {};
+
+  try {
+    const raw = fs.readFileSync(contextPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const { file: _reserved, ...rest } = parsed;
+    return rest;
+  } catch {
+    return {};
+  }
+}
+
+// Attributes with special handling in buildMetaRecord
+const SPECIAL_ATTRS = new Set(["file", "description", "tags"]);
+
+// Built-in meta record keys that dynamic attributes must not overwrite
+const BUILTIN_KEYS = new Set([
+  "type", "transcriptId", "timing", "messageCount",
+  "toolCount", "tools", "escInterrupts", "tokens", "subagents",
+]);
+
+// All reserved keys: special + built-in
+const RESERVED_ATTRS = new Set([...SPECIAL_ATTRS, ...BUILTIN_KEYS]);
+
+/**
  * Build meta record for transcript start
  * @param {object} stats - Transcript statistics
  * @param {object|null} metaInfo - Parsed meta tag info
+ * @param {object} context - Context from snoop-context.json
  * @returns {object} Meta record to write as first JSONL line
  */
-export function buildMetaRecord(stats, metaInfo) {
+export function buildMetaRecord(stats, metaInfo, context = {}) {
   const record = {
     type: "meta",
     transcriptId: stats.transcriptId,
@@ -147,10 +179,32 @@ export function buildMetaRecord(stats, metaInfo) {
     record.subagents = stats.subagents;
   }
 
+  // Layer 1: context file values (excluding reserved attrs handled below)
+  for (const [key, value] of Object.entries(context)) {
+    if (!RESERVED_ATTRS.has(key)) {
+      record[key] = value;
+    }
+  }
+
+  // Layer 1: context file reserved attrs
+  if (context.description) record.description = context.description;
+  if (context.tags) {
+    record.tags = (Array.isArray(context.tags) ? context.tags : String(context.tags).split(",").map((t) => t.trim()).filter((t) => t));
+  }
+
+  // Layer 2: dynamic meta tag attrs override context (excluding reserved)
+  if (metaInfo) {
+    for (const [key, value] of Object.entries(metaInfo)) {
+      if (!RESERVED_ATTRS.has(key)) {
+        record[key] = value;
+      }
+    }
+  }
+
+  // Layer 2: meta tag reserved attrs override context
   if (metaInfo?.description) {
     record.description = metaInfo.description;
   }
-
   if (metaInfo?.tags) {
     record.tags = metaInfo.tags.split(",").map((t) => t.trim()).filter((t) => t);
   }

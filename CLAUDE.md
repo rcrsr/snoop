@@ -35,12 +35,24 @@ claude --plugin-dir /path/to/snoop
 
 ## Meta Tags
 
-Add `<snoop:meta file="..." description="..." tags="..."/>` anywhere in conversation to:
-- **file**: Custom transcript path (relative to project root, always uses `.jsonl` extension)
+Add `<snoop:meta key="value"/>` anywhere in conversation. Three reserved attributes:
+- **file**: Custom transcript path (relative to project root, always `.jsonl`)
 - **description**: Free-text description stored in meta record
-- **tags**: Comma-separated tags for categorization
+- **tags**: Comma-separated tags, stored as array
 
-Multiple tags: last one wins. Custom paths skip `latest` pointer and pruning.
+All other attributes pass through as raw strings to the meta record.
+Multiple tags per conversation: last one wins (no merging). Custom paths skip `latest` pointer and pruning.
+
+## Context File
+
+Place `.claude/snoop-context.json` in the project root to set default meta values:
+
+```json
+{ "project": "snoop", "team": "platform", "tags": "plugin,debug" }
+```
+
+Merge order: context file values < snoop meta tag values.
+Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## When Editing
 
@@ -67,8 +79,9 @@ JSONL with meta record first, then one message per line:
 | `escInterrupts` | number | ESC interrupt count |
 | `tokens` | object | Token usage breakdown |
 | `subagents` | array | Subagent type names (if any) |
-| `description` | string | From meta tag (optional) |
-| `tags` | array | From meta tag (optional) |
+| `description` | string | From meta tag or context file (optional) |
+| `tags` | array | From meta tag or context file (optional) |
+| `*` | any | Dynamic attributes from meta tag or context file |
 
 ### Message Records
 
