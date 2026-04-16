@@ -59,6 +59,7 @@ tail -20 transcript.jsonl | jq -s '.'         # Last messages
 
 | Category | Indicators |
 | -------- | ---------- |
+| Turn Failure (API Error) | See "Turn Failures" section below — `0s` duration + `0` output tokens + no assistant response |
 | Errors/Failures | `is_error":true`, hook blocks, unhandled exceptions |
 | Thinking Loops | Repeated reasoning without progress, circular logic |
 | Trial-and-Error | Random attempts without diagnosis, no hypothesis-test-conclude |
@@ -67,6 +68,81 @@ tail -20 transcript.jsonl | jq -s '.'         # Last messages
 | Subagent Misuse | Excessive subagent spawns, wrong agent type for task, subagent errors |
 | Token Waste | High cache misses, redundant context, oversized tool results |
 | Incomplete Work | Started tasks with no completion, missing verification |
+
+## Turn Failures (API Error Detection)
+
+A `StopFailure`-captured transcript has a distinct fingerprint. The turn began but the API call never completed — rate limit, 5xx, auth failure, or network error.
+
+**Fingerprint in the meta record:**
+
+```json
+{
+  "type": "meta",
+  "timing": { "duration": "0s" },
+  "messageCount": 1-3,
+  "toolCount": 0,
+  "tokens": { "output": 0, "apiCalls": 0 }
+}
+```
+
+All four signals together (`0s` / tiny message count / `0` tools / `0` output) strongly indicate a turn that didn't complete. A normal trivial turn still produces output tokens from the assistant's reply — a failed turn doesn't.
+
+**Detection command:**
+
+```bash
+# Find meta records with the failure signature
+head -1 transcript.jsonl | jq 'select(.tokens.output == 0 and .tokens.apiCalls == 0 and .toolCount == 0)'
+```
+
+### Diagnosing the Root Cause
+
+The snoop transcript itself is sparse for failed turns (no assistant response was written). To find *what* failed, cross-reference the live Claude Code session JSONL, which contains richer error context.
+
+**Live session location** (derived from the user's working directory):
+
+```bash
+# Replace / with - in the cwd path to locate the session dir
+PROJECT_SLUG=$(pwd | sed 's|/|-|g')
+ls ~/.claude/projects/${PROJECT_SLUG}/*.jsonl
+```
+
+**Evidence to look for** inside the matching live session JSONL, around the StopFailure timestamp:
+
+| Pattern | What it reveals |
+| ------- | --------------- |
+| `"type":"attachment"` with `"type":"api_error"` | Exact HTTP status + error body |
+| `"hook_failure"` or `"hook_timeout"` attachments | Hook that blocked or ran too long |
+| `429` / `"rate_limit"` strings | Rate limit hit — check `retry-after` if present |
+| `5xx` / `overloaded_error` | Anthropic server issue |
+| `prompt_too_long` / context overflow | Prompt exceeded model's context window |
+| `invalid_api_key` / `401` / `403` | Auth or credentials issue |
+
+**Cross-reference command template:**
+
+```bash
+# Find the session file and grep near the StopFailure timestamp
+grep -a "api_error\|rate_limit\|overloaded\|prompt_too_long\|hook_failure" \
+  ~/.claude/projects/${PROJECT_SLUG}/*.jsonl | head -20
+```
+
+### Severity for Turn Failures
+
+Classify **context-dependently**:
+
+| Condition | Severity |
+| --------- | -------- |
+| Last assistant message contained a pending `tool_use` with no `tool_result` | **Critical** — mid-task interruption, work was in flight |
+| Failure immediately after user prompt, no assistant activity yet | **Medium** — user can simply retry with no lost progress |
+| Repeated failures across adjacent transcripts (e.g., 3+ in a row) | **Critical** — systemic issue, not a transient blip |
+
+**Detection command for pending tool_use:**
+
+```bash
+# Check if the last assistant message in the transcript had an unresolved tool_use
+tac transcript.jsonl | jq -r 'select(.type == "assistant") | .message.content[] | select(.type == "tool_use") | .name' | head -1
+```
+
+If that returns a tool name, the failure interrupted that tool — classify Critical.
 
 **Example issue detection:**
 
