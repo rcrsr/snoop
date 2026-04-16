@@ -1,6 +1,6 @@
 ---
 name: review
-description: Analyze a Claude Code transcript and generate a post-mortem review report. Use when the user asks to review a transcript, analyze a past session, find what went wrong, debug loops or scope creep, or audit token usage in a prior run. Triggers on phrases like "review my last session", "analyze this transcript", "what went wrong", "post-mortem", or `/snoop:review`.
+description: Analyze Claude Code transcripts and generate detailed post-mortem review reports. Use when the user asks to review, debug, or audit a past session.
 argument-hint: "[transcript-id] [concern]"
 ---
 
