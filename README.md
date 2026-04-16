@@ -88,6 +88,10 @@ After each session, Snoop outputs a status line:
 [abc12345 | 1m 15s | ⚠️ 2x ESC | 23 msgs | ...]
 ```
 
+## Gotchas
+
+**Focus mode hides the status line.** Claude Code's focus mode (toggle with `/focus`) suppresses all hook `systemMessage` output, so you won't see the `[snoop] ...` line after each turn. Transcripts are still captured to disk — only the UI notification is hidden. Toggle focus off with `/focus` if you want the live status back.
+
 ## Token Counting
 
 All token counts are API-reported. Main conversation usage comes from streaming message chunks (last chunk per request carries the cumulative total). Subagent usage comes from `toolUseResult.usage`.
