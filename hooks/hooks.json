@@ -21,6 +21,17 @@
           }
         ]
       }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/capture-transcript.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
