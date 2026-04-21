@@ -19,7 +19,7 @@ import {
   countEscInterrupts,
   buildAgentNameMap,
 } from "./lib/messages.mjs";
-import { calculateTokenUsage } from "./lib/tokens.mjs";
+import { calculateTokenUsage, calculateOutputByModel } from "./lib/tokens.mjs";
 import { scanForMetaTags, normalizeFilePath, buildMetaRecord, loadSnoopContext } from "./lib/meta.mjs";
 
 // -----------------------------------------------------------------------------
@@ -120,6 +120,12 @@ async function handleUserPromptSubmit(transcriptPath, partialFile) {
  * record. Collapses internal whitespace into single spaces so the preview
  * stays on one line, then trims to maxChars characters.
  */
+function modelShortcode(modelId) {
+  const m = modelId.match(/claude-(sonnet|opus|haiku)-(\d+)-(\d+)/);
+  if (!m) return modelId;
+  return { sonnet: "s", opus: "o", haiku: "h" }[m[1]] + m[2] + m[3];
+}
+
 function buildLastAssistantPreview(raw, maxChars = 200) {
   if (typeof raw !== "string" || !raw) return null;
   const collapsed = raw.replace(/\s+/g, " ").trim();
@@ -199,6 +205,7 @@ async function handleStop(transcriptPath, partialFile, outputDir, projectDir, la
   const uniqueTools = getUniqueTools(combined);
   const escCount = countEscInterrupts(combined);
   const tokens = calculateTokenUsage(combined);
+  const outputByModel = calculateOutputByModel(combined);
   const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort();
   const agentNameMap = buildAgentNameMap(combined);
   const subagentNames = [...new Set(subagentIds.map((id) => agentNameMap.get(id) || id))].sort();
@@ -262,7 +269,16 @@ async function handleStop(transcriptPath, partialFile, outputDir, projectDir, la
   const cacheEfficiency = tokens.totalInput > 0 ? Math.round((tokens.cacheRead / tokens.totalInput) * 100) : 0;
   if (cacheEfficiency > 0) breakdownParts.push(`${cacheEfficiency}% ce`);
   const breakdown = breakdownParts.length > 0 ? ` (${breakdownParts.join(" / ")})` : "";
-  const tokenSummary = `${tokens.totalInput.toLocaleString()} in${breakdown} | ${tokens.output.toLocaleString()} out`;
+  const modelEntries = Object.entries(outputByModel);
+  let modelBreakdown = "";
+  if (modelEntries.length > 1) {
+    const total = modelEntries.reduce((s, [, n]) => s + n, 0);
+    modelBreakdown = " | " + modelEntries
+      .sort((a, b) => b[1] - a[1])
+      .map(([model, n]) => `${Math.round((n / total) * 100)}% ${modelShortcode(model)}`)
+      .join(" / ");
+  }
+  const tokenSummary = `${tokens.totalInput.toLocaleString()} in${breakdown} | ${tokens.output.toLocaleString()} out${modelBreakdown}`;
 
   const subagentCount = subagentIds.length;
   const subagentInfo = subagentCount > 0 ? ` | ${subagentCount} si (${subagentNames.join(", ")})` : "";

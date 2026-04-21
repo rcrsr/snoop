@@ -70,3 +70,30 @@ export function calculateTokenUsage(messages) {
     apiCalls: byRequest.size,
   };
 }
+
+// Returns { modelId: outputTokenCount } across all messages, deduplicated by requestId.
+// Covers both main and subagent messages since both carry message.model.
+export function calculateOutputByModel(messages) {
+  const byRequest = new Map(); // requestId -> { model, output }
+
+  const sorted = [...messages].sort((a, b) => {
+    const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return ta - tb;
+  });
+
+  for (const msg of sorted) {
+    if (msg.requestId && msg.message?.usage && msg.message?.model) {
+      byRequest.set(msg.requestId, {
+        model: msg.message.model,
+        output: msg.message.usage.output_tokens ?? msg.message.usage.output ?? 0,
+      });
+    }
+  }
+
+  const result = {};
+  for (const { model, output } of byRequest.values()) {
+    result[model] = (result[model] || 0) + output;
+  }
+  return result;
+}
