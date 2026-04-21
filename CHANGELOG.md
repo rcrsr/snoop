@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.0] - 2026-04-20
+
+### Added
+
+- `StopFailure` hook: captures transcripts when turns end in API errors (rate limit, 5xx, auth failure). Fires instead of `Stop` on failure; same capture pipeline.
+- `lastAssistantPreview` in meta record: single-line preview of the turn's final assistant message, up to 200 chars with `…` suffix when truncated. Requires Claude Code 2.1.101+; omitted on older versions and StopFailure turns.
+- `/snoop:review` migrated to `skills/review/SKILL.md` (Claude Code 2.1.3+ skills system). Auto-discoverable by intent; slash command invocation unchanged.
+
+### Removed
+
+- `commands/review.md` replaced by `skills/review/SKILL.md`.
+
 ## [1.5.0] - 2026-03-08
 
 ### Added
