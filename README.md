@@ -162,7 +162,7 @@ JSONL with one message per line:
   "type": "user|assistant|interrupt",
   "timestamp": "ISO-8601",
   "uuid": "message-uuid",
-  "message": { "role": "user|assistant", "content": "..." }
+  "message": { "role": "user|assistant", "model": "claude-sonnet-4-6", "content": "..." }
 }
 ```
 

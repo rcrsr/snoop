@@ -94,6 +94,7 @@ JSONL with meta record first, then one message per line:
 | `uuid` | string | Message UUID |
 | `requestId` | string | API request ID (for deduping streaming chunks) |
 | `subagent` | string | Agent ID if from Task tool subagent |
+| `message.model` | string | Model ID for this message (e.g. `claude-sonnet-4-6`). Varies per message when subagents use different models. |
 | `message.content` | array | Blocks: `tool_use`, `tool_result`, `text`, `thinking` |
 | `message.usage` | object | `input`, `output`, `cacheRead`, `cacheCreate`, `cache5m`, `cache1h` token counts |
 

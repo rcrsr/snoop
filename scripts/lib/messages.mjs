@@ -86,6 +86,9 @@ export function streamlineMessage(msg) {
       role: msg.message.role,
       content: Array.isArray(content) ? content.map(cleanContentBlock) : content,
     };
+    if (msg.message.model) {
+      result.message.model = msg.message.model;
+    }
     if (msg.message.usage) {
       result.message.usage = {
         input: msg.message.usage.input_tokens || 0,
