@@ -22,9 +22,9 @@ claude --plugin-dir /path/to/snoop
 | `scripts/lib/messages.mjs` | Message filtering, streamlining, analysis |
 | `scripts/lib/tokens.mjs` | Token calculation from API-reported usage |
 | `scripts/lib/meta.mjs` | Meta tag scanning and parsing |
-| `hooks/hooks.json` | Binds `UserPromptSubmit` and `Stop` events |
+| `hooks/hooks.json` | Binds `UserPromptSubmit`, `Stop`, and `StopFailure` events |
 | `agents/transcript-reviewer.md` | Post-mortem analysis agent (haiku model) |
-| `commands/review.md` | `/snoop:review` entry point |
+| `skills/review/SKILL.md` | `/snoop:review` entry point (Claude Code 2.1.3+) |
 
 ## Hook Behavior
 
@@ -32,6 +32,7 @@ claude --plugin-dir /path/to/snoop
 |-------|--------|
 | `UserPromptSubmit` | Detect ESC interrupt (pending `tool_use`), save partial transcript |
 | `Stop` | Merge partials, write meta record + messages, update `latest` pointer, prune to 10 files |
+| `StopFailure` | Same pipeline as `Stop`; fires instead of `Stop` on API errors (rate limit, 5xx, auth). Captured transcript has `0` output tokens, `0` tools, and no `lastAssistantPreview`. |
 
 ## Meta Tags
 
@@ -52,7 +53,7 @@ Place `.claude/snoop-context.json` in the project root to set default meta value
 ```
 
 Merge order: context file values < snoop meta tag values.
-Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## When Editing
 
@@ -79,6 +80,7 @@ JSONL with meta record first, then one message per line:
 | `escInterrupts` | number | ESC interrupt count |
 | `tokens` | object | Token usage breakdown |
 | `subagents` | array | Subagent type names (if any) |
+| `lastAssistantPreview` | string | Single-line preview of final assistant message, ≤200 chars (optional, Claude Code 2.1.101+) |
 | `description` | string | From meta tag or context file (optional) |
 | `tags` | array | From meta tag or context file (optional) |
 | `*` | any | Dynamic attributes from meta tag or context file |

@@ -23,7 +23,8 @@ Snoop uses Claude Code's hook system to capture transcripts at two points:
 | Hook | Trigger | Action |
 |------|---------|--------|
 | `UserPromptSubmit` | User sends a message | Check for pending `tool_use` without `tool_result` (indicates ESC interrupt). Save partial transcript with interrupt marker. |
-| `Stop` | Session ends | Merge any partial transcripts, write final JSONL, update `latest` pointer, prune old files. |
+| `Stop` | Session ends normally | Merge any partial transcripts, write final JSONL, update `latest` pointer, prune old files. |
+| `StopFailure` | Session ends in API error (rate limit, 5xx, auth) | Same pipeline as `Stop`. Resulting transcript has `0` output tokens, `0` tool calls, and no `lastAssistantPreview`. |
 
 **Interrupt detection:** When you press ESC mid-response, Claude's last message contains a `tool_use` block that never received a `tool_result`. Snoop detects this pattern and inserts an interrupt marker before your next message.
 
