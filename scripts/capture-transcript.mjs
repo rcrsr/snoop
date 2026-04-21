@@ -115,7 +115,19 @@ async function handleUserPromptSubmit(transcriptPath, partialFile) {
   fs.writeFileSync(partialFile, output);
 }
 
-async function handleStop(transcriptPath, partialFile, outputDir, projectDir) {
+/**
+ * Truncate and normalize the Stop hook's last_assistant_message for the meta
+ * record. Collapses internal whitespace into single spaces so the preview
+ * stays on one line, then trims to maxChars characters.
+ */
+function buildLastAssistantPreview(raw, maxChars = 200) {
+  if (typeof raw !== "string" || !raw) return null;
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  return collapsed.length <= maxChars ? collapsed : collapsed.slice(0, maxChars - 1) + "…";
+}
+
+async function handleStop(transcriptPath, partialFile, outputDir, projectDir, lastAssistantMessage) {
   const messages = await readJsonLines(transcriptPath);
   const startIndex = findLastUserPromptIndex(messages);
 
@@ -202,6 +214,7 @@ async function handleStop(transcriptPath, partialFile, outputDir, projectDir) {
       escInterrupts: escCount,
       tokens,
       subagents: subagentNames,
+      lastAssistantPreview: buildLastAssistantPreview(lastAssistantMessage),
     },
     metaInfo,
     snoopContext
@@ -300,7 +313,7 @@ async function main() {
     process.exit(0);
   }
 
-  const result = await handleStop(transcriptPath, partialFile, outputDir, projectDir);
+  const result = await handleStop(transcriptPath, partialFile, outputDir, projectDir, input.last_assistant_message);
   if (result.systemMessage) {
     console.log(JSON.stringify(result));
   }

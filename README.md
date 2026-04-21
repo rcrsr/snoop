@@ -129,7 +129,11 @@ Place `.claude/snoop-context.json` in your project to set default meta values fo
 }
 ```
 
-Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+
+## Last Assistant Preview
+
+When running on Claude Code 2.1.101+, the meta record includes a `lastAssistantPreview` field: a trimmed, single-line preview of the turn's final assistant message (up to 200 characters, with `…` suffix when truncated). Useful for quickly scanning transcripts in a list. Omitted from the record when Claude Code didn't supply the data (older versions, or StopFailure turns that ended before any assistant output).
 
 ## Commands
 

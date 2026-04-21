@@ -147,6 +147,7 @@ const SPECIAL_ATTRS = new Set(["file", "description", "tags"]);
 const BUILTIN_KEYS = new Set([
   "type", "transcriptId", "timing", "messageCount",
   "toolCount", "tools", "escInterrupts", "tokens", "subagents",
+  "lastAssistantPreview",
 ]);
 
 // All reserved keys: special + built-in
@@ -177,6 +178,10 @@ export function buildMetaRecord(stats, metaInfo, context = {}) {
 
   if (stats.subagents && stats.subagents.length > 0) {
     record.subagents = stats.subagents;
+  }
+
+  if (stats.lastAssistantPreview) {
+    record.lastAssistantPreview = stats.lastAssistantPreview;
   }
 
   // Layer 1: context file values (excluding reserved attrs handled below)
