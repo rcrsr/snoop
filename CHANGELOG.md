@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.1] - 2026-04-20
+
+### Added
+
+- `message.model` captured per assistant message. Subagents running on different models each carry their own model ID.
+- Model breakdown in status line when multiple models are used: `... | 5,000 out | 20% s46 / 80% o47 | ...`. Sorted by descending output share. Shortcodes: `s`=sonnet, `o`=opus, `h`=haiku + major + minor version digits. Omitted for single-model sessions.
+
 ## [1.6.0] - 2026-04-20
 
 ### Added
