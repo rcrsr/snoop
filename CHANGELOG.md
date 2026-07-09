@@ -4,6 +4,42 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.0] - 2026-07-08
+
+### Added
+
+- `tokens.visibleOutput` in the meta record: estimated visible output tokens, counting characters of `text` blocks plus each `tool_use` block's name and JSON-serialized input, at 4 chars/token. Thinking blocks are excluded. Covers main and subagent messages.
+- `tokens.dedupedOutput` in the meta record: API-reported output tokens across main and subagent messages, keeping one usage per `requestId`. The correct denominator for `visibleOutput`, since both cover the same messages; the legacy `tokens.output` undercounts subagent work whenever `toolUseResult` carries no `agentId`, and keeps its semantics unchanged for longitudinal comparability.
+- `outputByModel` in the meta record: per-model output token counts, previously computed for the status line only.
+- `transcript-reviewer` recognizes turn failures captured by the `StopFailure` hook and diagnoses their cause. New "Turn Failure (API Error)" issue category, severity rules keyed on unresolved `tool_use` blocks, and a cross-reference to the live session JSONL where the error is recorded as an assistant message flagged `isApiErrorMessage`. Adapted from #3 by @tedserbinski. Detection keys on the absence of `lastAssistantPreview` rather than a four-signal shape match, which misses turns that fail after tool calls have run.
+- Output composition in the status line: `| 9,572 out (3,672 v / 5,900 r)`, where `v` is `visibleOutput` and `r` is the residual `dedupedOutput - visibleOutput`. The residual is reasoning tokens plus the `visibleOutput` estimate's own error, floored at 0. Omitted when output is 0.
+
+### Changed
+
+- Status line `out` now reports `tokens.dedupedOutput` rather than `tokens.output`, so the `v`/`r` parts sum to the displayed total. The two totals are identical on turns without subagents; on subagent turns the displayed value rises, because `tokens.output` was undercounting.
+- The Stop hook does less work before returning. The settle poll checks the session file's size and only re-parses once it grows, saving roughly 164 ms of parsing per slow turn on a 2.3 MB session. Subagent transcripts whose last write predates the turn are never opened, which skips 104 of 105 files on the largest real subagents directory. The `subagents/` tree is walked once per Stop rather than twice, sidecars are read only when the turn spawned an agent, and dropping the two timestamp sorts takes the four token passes from 19 ms to 0.6 ms.
+- A turn whose only timestamped record is the user prompt now reports elapsed time instead of `unknown`, closing the span against the hook's wall clock, stamped before the settle poll so the wait is excluded. This affects turns that fail before the assistant replies. Claude Code's `system/turn_duration` record cannot supply this: it is written after the Stop hook returns, exists in 60% of sessions, and its `messageCount` is a session-wide running total rather than a per-turn count.
+
+- `incompleteCapture` in the meta record, plus an `⚠️ incomplete` status-line marker. Set when the settle poll times out before the final assistant message lands, so short token counts are never mistaken for real ones.
+
+### Fixed
+
+- `tokens.output` and `outputByModel` undercounted. Both sorted messages by timestamp, then kept the last usage per `requestId`. A request's JSONL lines do not repeat one usage: intermediate lines carry a partial `output_tokens` and only the closing line carries the total. A closing line can bear an earlier timestamp than a partial one, sort behind it, and lose. Measured across 600 real session files: 16 undercounted, the worst by 2,276 tokens (17.8%), 8,486 tokens lost in total. All three token functions now select the usage with the largest `output_tokens` per request, which is order-independent and needs no sort. Verified identical under reversed and shuffled input on all 600 files.
+- A corrupt partial transcript aborted every subsequent capture for that session. `handleStop` parsed `.partial_<session>.jsonl` with a bare `JSON.parse` per line, so one truncated line threw before `fs.unlinkSync` ran, leaving the file to fail the next Stop the same way. Both partial readers now use `readJsonLines`, which skips malformed lines.
+- The settle poll could exit on an assistant line holding only a `tool_use`, capturing the turn as of that tool call. A fixture whose final message lands 300 ms late captured `2 msgs | 10 out` instead of `4 msgs | 510 out`. The poll now waits for an assistant message with no pending `tool_use`.
+- An unreadable or removed `subagents/` subdirectory crashed the hook before the transcript was written, losing the whole turn. `findSubagentFiles` now returns `[]` on `readdirSync` failure.
+- `StopFailure` wrote `lastAssistantPreview` from the hook input, contradicting the documented invariant that failed turns never carry it and breaking the reviewer's detection. The field is now forced absent on `StopFailure`.
+- A blank final assistant message produced a null preview, so a completed turn was indistinguishable from a failed one. A blank reply now records an empty string; only a missing message omits the field.
+- `elideImage` assumed a base64 source and rebuilt the block, dropping the `url` of url-sourced images along with `media_type` and any other fields, while reporting `<elided 0 chars>`. Non-base64 image blocks now pass through untouched.
+- Status line printed `v` and `r` parts that exceeded their own total when the `visibleOutput` estimate overshot the API-reported total, as on a turn dominated by one large tool call. The breakdown is now omitted in that case.
+- `calculateTiming` closed the span at the hook clock only for single-message turns, so a turn whose final message never landed reported the time to its last `tool_result`. The turn now always ends at the later of its last timestamp and the hook clock.
+- Workflow agents were never captured. `getSubagentFiles()` read `subagents/` without recursing, but Workflow agents write to `subagents/workflows/wf_<runId>/`, so only Task subagents were found. On a measured 21-agent workflow run this dropped 59,959 output tokens (55% of all subagent output) and 252 tool calls, with no signal in the transcript that anything was missing. Discovery is now recursive, matching `agent-*.jsonl` so `journal.jsonl` stays excluded.
+- Subagent names now come from the `agent-<id>.meta.json` sidecar Claude Code writes beside each agent transcript. `buildAgentNameMap()` pairs `Task` tool_use blocks with `toolUseResult.agentId`, which Workflow agents never produce, so they would otherwise land in the `subagents` array as raw `agent-a0a95cc0…` IDs. The tool_use pairing remains as a fallback.
+- `calculateVisibleOutput()` deduplicated by `requestId` when a message had no `uuid`. A request spans one line per content block, so this dropped every block after the first, undercounting characters. Deduplication now happens on `uuid` only.
+- Turn's final assistant message was never captured. Claude Code invokes `Stop` before flushing that record to the session file, so every transcript ended at the last `tool_result`, dropping the final API call's output tokens, model, and text. Turns with no tool calls reported `0` for all token counts. `Stop` now polls the session file for up to 1000 ms (50 ms interval) until the last conversation record is an assistant message. `StopFailure` reads once, since no final assistant message is coming.
+- `messageCount` and `timing` counted non-conversation records. `shouldSkipMessage()` is now an allow-list keeping only `user`/`assistant` records with a `message` body plus snoop's `interrupt` marker, so the twelve bookkeeping record types Claude Code interleaves are excluded, as is any type it adds later. A survey of 512,168 records across 7,319 session files found these in 62% of captured turns. A single prompt-and-reply turn reported `9 msgs` and `0s`; it now reports `2 msgs` and the true duration.
+- `tool_result.content` was only truncated in its string form. The array form passed through verbatim, including base64 image payloads. The largest such result on disk measured 601,251 chars. Text blocks inside array content are now truncated to 500 chars and image payloads elided, reducing that result to 176 chars. Image blocks in assistant messages are elided the same way.
+
 ## [1.6.1] - 2026-04-20
 
 ### Added
