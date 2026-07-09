@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- `modelShortcode` left single-version model IDs unabbreviated in the status-line model breakdown. The regex required two numeric segments (`claude-opus-4-8` → `o48`), so `claude-sonnet-5` failed to match and printed its full ID, yielding a mixed line like `64% claude-sonnet-5 / 36% o48`. The second segment is now optional (`claude-sonnet-5` → `s5`) and the family map covers `fable`/`mythos` alongside `sonnet`/`opus`/`haiku`.
+
 ## [1.7.0] - 2026-07-08
 
 ### Added

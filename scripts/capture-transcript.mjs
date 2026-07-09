@@ -235,9 +235,10 @@ async function handleUserPromptSubmit(transcriptPath, partialFile) {
  * stays on one line, then trims to maxChars characters.
  */
 function modelShortcode(modelId) {
-  const m = modelId.match(/claude-(sonnet|opus|haiku)-(\d+)-(\d+)/)
+  const m = modelId.match(/claude-(sonnet|opus|haiku|fable|mythos)-(\d+)(?:-(\d+))?/)
   if (!m) return modelId
-  return { sonnet: 's', opus: 'o', haiku: 'h' }[m[1]] + m[2] + m[3]
+  const letter = { sonnet: 's', opus: 'o', haiku: 'h', fable: 'f', mythos: 'm' }[m[1]]
+  return letter + m[2] + (m[3] ?? '')
 }
 
 /**
@@ -299,12 +300,12 @@ async function handleStop(
   // Load and append subagent messages (only from current turn)
   const turnStart = current[0]?.timestamp ? new Date(current[0].timestamp).getTime() : 0
   const subagentFiles = walkSubagentFiles(subagentsDirFor(transcriptPath))
-  const subagentMessages = (await loadSubagentMessages(subagentFiles.transcripts, turnStart)).filter(
-    (m) => {
-      if (!m.timestamp || !turnStart) return true
-      return new Date(m.timestamp).getTime() >= turnStart
-    }
-  )
+  const subagentMessages = (
+    await loadSubagentMessages(subagentFiles.transcripts, turnStart)
+  ).filter((m) => {
+    if (!m.timestamp || !turnStart) return true
+    return new Date(m.timestamp).getTime() >= turnStart
+  })
   combined.push(...subagentMessages)
 
   // Scan for meta tags (last one wins) and load context file
