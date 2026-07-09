@@ -35,6 +35,49 @@ export function hasToolUse(msg) {
   return msg.message.content.some((block) => block.type === "tool_use");
 }
 
+const MAX_TOOL_RESULT_CHARS = 500;
+
+function truncateText(text) {
+  return text.length > MAX_TOOL_RESULT_CHARS
+    ? text.slice(0, MAX_TOOL_RESULT_CHARS) + "..."
+    : text;
+}
+
+/**
+ * Strip the payload from a base64 image block, keeping its shape. A base64
+ * screenshot runs to hundreds of kilobytes and carries no value in a
+ * transcript. Any other source shape (a url reference, say) is small and is
+ * returned untouched, since rebuilding it would discard fields we do not know
+ * about.
+ */
+function elideImage(block) {
+  const data = block.source?.data;
+  if (typeof data !== "string") return block;
+
+  return {
+    ...block,
+    source: { ...block.source, data: `<elided ${data.length} chars>` },
+  };
+}
+
+/**
+ * Tool results arrive with content as either a string or an array of blocks.
+ * The array form carries text and images, and images may be base64 payloads
+ * over 500,000 chars. Both forms are bounded here.
+ */
+function cleanToolResultContent(content) {
+  if (typeof content === "string") return truncateText(content);
+  if (!Array.isArray(content)) return content;
+
+  return content.map((block) => {
+    if (block.type === "text" && typeof block.text === "string") {
+      return { ...block, text: truncateText(block.text) };
+    }
+    if (block.type === "image") return elideImage(block);
+    return block;
+  });
+}
+
 /**
  * Clean a content block for transcript storage
  */
@@ -44,27 +87,49 @@ export function cleanContentBlock(block) {
       return { type: block.type, thinking: block.thinking };
     case "tool_use":
       return { type: block.type, id: block.id, name: block.name, input: block.input };
-    case "tool_result": {
-      let content = block.content;
-      if (typeof content === "string" && content.length > 500) {
-        content = content.slice(0, 500) + "...";
-      }
-      return { type: block.type, tool_use_id: block.tool_use_id, content };
-    }
+    case "tool_result":
+      return {
+        type: block.type,
+        tool_use_id: block.tool_use_id,
+        content: cleanToolResultContent(block.content),
+      };
+    case "image":
+      return elideImage(block);
     default:
       return block;
   }
 }
 
 /**
- * Check if message should be skipped from transcript
+ * Check if a raw session record is a conversation message (user or assistant
+ * turn carrying a message body), as opposed to a metadata record.
+ */
+export function isConversationMessage(msg) {
+  return (msg.type === "user" || msg.type === "assistant") && !!msg.message;
+}
+
+/**
+ * Check if message should be skipped from transcript.
+ *
+ * Claude Code interleaves a dozen bookkeeping record types with the real
+ * messages: attachment, mode, permission-mode, last-prompt, ai-title, system,
+ * queue-operation, pr-link, agent-name, file-history-snapshot, summary,
+ * progress. None carries a message body. Naming them individually meant every
+ * record type Claude Code added silently inflated messageCount and corrupted
+ * timing until someone noticed, so keep what we understand instead: the two
+ * conversation types, plus the interrupt marker snoop writes itself.
  */
 export function shouldSkipMessage(msg) {
-  return (
-    msg.type === "file-history-snapshot" ||
-    msg.type === "summary" ||
-    msg.type === "progress"
-  );
+  return !isConversationMessage(msg) && msg.type !== "interrupt";
+}
+
+/**
+ * Check if a record is a turn's settled final assistant message: an assistant
+ * message with no tool_use block still awaiting a result. A line carrying only
+ * a tool_use is mid-turn, even though it is an assistant record.
+ */
+export function isFinalAssistantMessage(msg) {
+  return msg?.type === "assistant" && !!msg.message && !hasToolUse(msg);
 }
 
 /**

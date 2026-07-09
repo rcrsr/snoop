@@ -2,24 +2,24 @@
  * Meta tag scanning and parsing for custom transcript naming
  */
 
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from 'fs'
+import * as path from 'path'
 
 // Pattern: <snoop:meta key="value" .../>
-const SNOOP_META_PATTERN = /<snoop:meta\s+([^>]+)\/>/g;
+const SNOOP_META_PATTERN = /<snoop:meta\s+([^>]+)\/>/g
 
 /**
  * Extract all key="value" attributes from a snoop:meta tag
  */
 function parseMetaAttributes(attrString) {
-  const result = {};
-  const attrPattern = /(\w+)="([^"]*)"/g;
-  let match;
+  const result = {}
+  const attrPattern = /(\w+)="([^"]*)"/g
+  let match
   while ((match = attrPattern.exec(attrString)) !== null) {
-    const [, name, value] = match;
-    result[name] = value;
+    const [, name, value] = match
+    result[name] = value
   }
-  return result;
+  return result
 }
 
 /**
@@ -27,44 +27,40 @@ function parseMetaAttributes(attrString) {
  * Handles: \" -> ", \\ -> \, \n -> newline, \t -> tab
  */
 function unescapeJsonString(str) {
-  return str
-    .replace(/\\"/g, '"')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\\\\/g, '\\');
+  return str.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\\\/g, '\\')
 }
 
 /**
  * Extract text content from a message for scanning
  */
 function extractTextContent(msg) {
-  const texts = [];
+  const texts = []
 
-  if (!msg.message?.content) return texts;
+  if (!msg.message?.content) return texts
 
-  const content = msg.message.content;
+  const content = msg.message.content
 
   // User messages with string content
-  if (typeof content === "string") {
-    texts.push(content);
-    return texts;
+  if (typeof content === 'string') {
+    texts.push(content)
+    return texts
   }
 
   // Array content (both user and assistant)
   if (Array.isArray(content)) {
     for (const block of content) {
-      if (block.type === "text" && block.text) {
+      if (block.type === 'text' && block.text) {
         // Unescape in case LLM shows JSON output containing the meta tag
-        texts.push(unescapeJsonString(block.text));
+        texts.push(unescapeJsonString(block.text))
       }
-      if (block.type === "tool_result" && typeof block.content === "string") {
+      if (block.type === 'tool_result' && typeof block.content === 'string') {
         // Unescape JSON strings so meta tags with escaped quotes can be matched
-        texts.push(unescapeJsonString(block.content));
+        texts.push(unescapeJsonString(block.content))
       }
     }
   }
 
-  return texts;
+  return texts
 }
 
 /**
@@ -73,24 +69,24 @@ function extractTextContent(msg) {
  * @returns {null | { file?: string, description?: string, tags?: string, [key: string]: string }}
  */
 export function scanForMetaTags(messages) {
-  let lastMeta = null;
+  let lastMeta = null
 
   for (const msg of messages) {
-    const texts = extractTextContent(msg);
+    const texts = extractTextContent(msg)
     for (const text of texts) {
       // Reset regex state for each text block
-      SNOOP_META_PATTERN.lastIndex = 0;
-      let match;
+      SNOOP_META_PATTERN.lastIndex = 0
+      let match
       while ((match = SNOOP_META_PATTERN.exec(text)) !== null) {
-        const attrs = parseMetaAttributes(match[1]);
+        const attrs = parseMetaAttributes(match[1])
         if (Object.keys(attrs).length > 0) {
-          lastMeta = attrs;
+          lastMeta = attrs
         }
       }
     }
   }
 
-  return lastMeta;
+  return lastMeta
 }
 
 /**
@@ -104,19 +100,19 @@ export function scanForMetaTags(messages) {
 export function normalizeFilePath(filePath) {
   // Reject absolute paths
   if (path.isAbsolute(filePath)) {
-    throw new Error(`Invalid meta file path: absolute paths not allowed (${filePath})`);
+    throw new Error(`Invalid meta file path: absolute paths not allowed (${filePath})`)
   }
 
   // Normalize and check for path traversal
-  const normalized = path.normalize(filePath);
-  if (normalized.startsWith("..") || normalized.includes("/../") || normalized.includes("\\..\\")) {
-    throw new Error(`Invalid meta file path: path traversal not allowed (${filePath})`);
+  const normalized = path.normalize(filePath)
+  if (normalized.startsWith('..') || normalized.includes('/../') || normalized.includes('\\..\\')) {
+    throw new Error(`Invalid meta file path: path traversal not allowed (${filePath})`)
   }
 
   // Always use .jsonl extension - strip any existing extension and add .jsonl
-  const ext = path.extname(normalized);
-  const basePath = ext ? normalized.slice(0, -ext.length) : normalized;
-  return basePath + ".jsonl";
+  const ext = path.extname(normalized)
+  const basePath = ext ? normalized.slice(0, -ext.length) : normalized
+  return basePath + '.jsonl'
 }
 
 /**
@@ -126,32 +122,41 @@ export function normalizeFilePath(filePath) {
  * @returns {object} Context key-value pairs, or empty object
  */
 export function loadSnoopContext(projectDir) {
-  const contextPath = path.join(projectDir, ".claude", "snoop-context.json");
-  if (!fs.existsSync(contextPath)) return {};
+  const contextPath = path.join(projectDir, '.claude', 'snoop-context.json')
+  if (!fs.existsSync(contextPath)) return {}
 
   try {
-    const raw = fs.readFileSync(contextPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-    const { file: _reserved, ...rest } = parsed;
-    return rest;
+    const raw = fs.readFileSync(contextPath, 'utf-8')
+    const parsed = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+    const { file: _reserved, ...rest } = parsed
+    return rest
   } catch {
-    return {};
+    return {}
   }
 }
 
 // Attributes with special handling in buildMetaRecord
-const SPECIAL_ATTRS = new Set(["file", "description", "tags"]);
+const SPECIAL_ATTRS = new Set(['file', 'description', 'tags'])
 
 // Built-in meta record keys that dynamic attributes must not overwrite
 const BUILTIN_KEYS = new Set([
-  "type", "transcriptId", "timing", "messageCount",
-  "toolCount", "tools", "escInterrupts", "tokens", "subagents",
-  "lastAssistantPreview",
-]);
+  'type',
+  'transcriptId',
+  'timing',
+  'messageCount',
+  'toolCount',
+  'tools',
+  'escInterrupts',
+  'tokens',
+  'outputByModel',
+  'subagents',
+  'lastAssistantPreview',
+  'incompleteCapture',
+])
 
 // All reserved keys: special + built-in
-const RESERVED_ATTRS = new Set([...SPECIAL_ATTRS, ...BUILTIN_KEYS]);
+const RESERVED_ATTRS = new Set([...SPECIAL_ATTRS, ...BUILTIN_KEYS])
 
 /**
  * Build meta record for transcript start
@@ -162,7 +167,7 @@ const RESERVED_ATTRS = new Set([...SPECIAL_ATTRS, ...BUILTIN_KEYS]);
  */
 export function buildMetaRecord(stats, metaInfo, context = {}) {
   const record = {
-    type: "meta",
+    type: 'meta',
     transcriptId: stats.transcriptId,
     timing: {
       start: stats.timing.start,
@@ -174,45 +179,63 @@ export function buildMetaRecord(stats, metaInfo, context = {}) {
     tools: stats.tools,
     escInterrupts: stats.escInterrupts,
     tokens: stats.tokens,
-  };
-
-  if (stats.subagents && stats.subagents.length > 0) {
-    record.subagents = stats.subagents;
   }
 
-  if (stats.lastAssistantPreview) {
-    record.lastAssistantPreview = stats.lastAssistantPreview;
+  if (stats.outputByModel && Object.keys(stats.outputByModel).length > 0) {
+    record.outputByModel = stats.outputByModel
+  }
+
+  if (stats.subagents && stats.subagents.length > 0) {
+    record.subagents = stats.subagents
+  }
+
+  // Absent means the turn produced no final assistant message. An empty string
+  // means it produced a blank one. The two must stay distinguishable.
+  if (stats.lastAssistantPreview != null) {
+    record.lastAssistantPreview = stats.lastAssistantPreview
+  }
+
+  if (stats.incompleteCapture) {
+    record.incompleteCapture = true
   }
 
   // Layer 1: context file values (excluding reserved attrs handled below)
   for (const [key, value] of Object.entries(context)) {
     if (!RESERVED_ATTRS.has(key)) {
-      record[key] = value;
+      record[key] = value
     }
   }
 
   // Layer 1: context file reserved attrs
-  if (context.description) record.description = context.description;
+  if (context.description) record.description = context.description
   if (context.tags) {
-    record.tags = (Array.isArray(context.tags) ? context.tags : String(context.tags).split(",").map((t) => t.trim()).filter((t) => t));
+    record.tags = Array.isArray(context.tags)
+      ? context.tags
+      : String(context.tags)
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t)
   }
 
   // Layer 2: dynamic meta tag attrs override context (excluding reserved)
   if (metaInfo) {
     for (const [key, value] of Object.entries(metaInfo)) {
       if (!RESERVED_ATTRS.has(key)) {
-        record[key] = value;
+        record[key] = value
       }
     }
   }
 
   // Layer 2: meta tag reserved attrs override context
   if (metaInfo?.description) {
-    record.description = metaInfo.description;
+    record.description = metaInfo.description
   }
   if (metaInfo?.tags) {
-    record.tags = metaInfo.tags.split(",").map((t) => t.trim()).filter((t) => t);
+    record.tags = metaInfo.tags
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => t)
   }
 
-  return record;
+  return record
 }
