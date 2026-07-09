@@ -1,7 +1,7 @@
 {
   "name": "snoop",
   "description": "Captures Claude Code run transcripts for debugging and review",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "author": {
     "name": "Andre Bremer",
     "url": "https://andrebremer.com"
