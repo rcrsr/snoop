@@ -59,6 +59,7 @@ tail -20 transcript.jsonl | jq -s '.'         # Last messages
 
 | Category | Indicators |
 | -------- | ---------- |
+| Turn Failure (API Error) | No `lastAssistantPreview` in the meta record. See "Turn Failures" below |
 | Errors/Failures | `is_error":true`, hook blocks, unhandled exceptions |
 | Thinking Loops | Repeated reasoning without progress, circular logic |
 | Trial-and-Error | Random attempts without diagnosis, no hypothesis-test-conclude |
@@ -67,6 +68,80 @@ tail -20 transcript.jsonl | jq -s '.'         # Last messages
 | Subagent Misuse | Excessive subagent spawns, wrong agent type for task, subagent errors |
 | Token Waste | High cache misses, redundant context, oversized tool results |
 | Incomplete Work | Started tasks with no completion, missing verification |
+
+## Turn Failures (API Error Detection)
+
+The `StopFailure` hook fires instead of `Stop` when a turn ends in an API error: rate limit, session limit, 5xx, or auth failure. Snoop still captures the transcript, but the turn's final assistant message never existed.
+
+### Detection
+
+A completed turn always records `lastAssistantPreview`. A failed turn never does. That single field separates the two, whether the failure hit before any assistant output or midway through tool calls.
+
+```bash
+head -1 transcript.jsonl | jq 'select(has("lastAssistantPreview") | not)'
+```
+
+Test for the key's absence, not for a null value. A turn whose final assistant message was blank records an empty string, which is a completed turn, not a failure.
+
+**Version caveat:** `lastAssistantPreview` requires Claude Code 2.1.101+. On older versions no transcript has it, so the check flags everything. Confirm at least one transcript in `.claude/transcripts/` carries the field before trusting its absence:
+
+```bash
+head -qn1 .claude/transcripts/*.jsonl | jq -s 'map(select(has("lastAssistantPreview"))) | length'
+```
+
+If that returns `0` for a directory with many transcripts, fall back to the shape check.
+
+**Separate concern:** `incompleteCapture: true` means the turn succeeded but its final assistant message never reached disk before snoop's deadline. Output tokens, model attribution, and the preview are all short. Report the capture as unreliable rather than the turn as failed, and do not draw token conclusions from it.
+
+### Shape Check (fallback)
+
+A turn that failed *before any assistant output* has this meta record:
+
+```json
+{
+  "messageCount": 1,
+  "toolCount": 0,
+  "tokens": { "output": 0, "apiCalls": 0 }
+}
+```
+
+Read `timing.duration` as how long the user waited before the error surfaced, measured from the prompt to the moment capture ran. It is a real elapsed time, so it carries no signal about whether the turn failed. Do not use it to detect failures.
+
+**This shape catches only the earliest failures.** A turn that errors after tool calls have run keeps its tools and its tokens. Never treat `toolCount: 0` as a prerequisite for a failed turn.
+
+### Severity
+
+Severity depends on whether work was in flight, which is decided by unresolved `tool_use` blocks in the **main agent's** messages:
+
+```bash
+jq -s '
+  [.[] | select(.subagent == null)] |
+  ([.[] | select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .id]
+   - [.[] | select(.type=="user") | .message.content[]? | select(.type=="tool_result") | .tool_use_id])
+' transcript.jsonl
+```
+
+The `select(.subagent == null)` filter is required. Subagent transcripts carry their own `tool_use` blocks and would otherwise register as unresolved.
+
+| Condition | Severity |
+| --------- | -------- |
+| One or more unresolved `tool_use` | **Critical**, a mid-task interruption with work in flight |
+| No unresolved `tool_use`, no assistant output | **Medium**, the user retries and loses nothing |
+| 3+ consecutive failed transcripts | **Critical**, a systemic fault rather than a transient blip |
+
+### Diagnosing the Root Cause
+
+Snoop's transcript records that the turn failed, not why. Cross-reference the live Claude Code session JSONL, where the error arrives as an assistant message flagged `isApiErrorMessage`.
+
+```bash
+SLUG=$(pwd | sed 's|/|-|g')
+grep -rh '"isApiErrorMessage":true' ~/.claude/projects/${SLUG}/ \
+  | jq -r '.timestamp + "  " + (.message.content[0].text // "")' | sort | tail -5
+```
+
+Recursion matters: agents spawned by Task and Workflow hit rate limits independently of the main agent, and their errors live in `subagents/` rather than the top-level session file.
+
+Observed messages include `API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited` and `You've hit your session limit · resets <time>`. Report the message verbatim; do not infer an HTTP status code that the record does not contain.
 
 **Example issue detection:**
 
