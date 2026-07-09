@@ -23,12 +23,18 @@ Snoop uses Claude Code's hook system to capture transcripts at two points:
 | Hook | Trigger | Action |
 |------|---------|--------|
 | `UserPromptSubmit` | User sends a message | Check for pending `tool_use` without `tool_result` (indicates ESC interrupt). Save partial transcript with interrupt marker. |
-| `Stop` | Session ends normally | Merge any partial transcripts, write final JSONL, update `latest` pointer, prune old files. |
-| `StopFailure` | Session ends in API error (rate limit, 5xx, auth) | Same pipeline as `Stop`. Resulting transcript has `0` output tokens, `0` tool calls, and no `lastAssistantPreview`. |
+| `Stop` | Session ends normally | Wait for the turn's final assistant message to reach the session file, merge any partial transcripts, write final JSONL, update `latest` pointer, prune old files. |
+| `StopFailure` | Session ends in API error (rate limit, 5xx, auth) | Same pipeline as `Stop`, minus the wait. Resulting transcript never has `lastAssistantPreview`, which is how `/snoop:review` identifies a failed turn. Turns that fail before any assistant output also show `0` output tokens and `0` tool calls; turns that fail after tool calls retain both. |
+
+**Final message capture:** Claude Code fires `Stop` before it flushes the turn's last assistant message to disk. Snoop polls for up to 1000 ms until the last conversation record is an assistant message, then captures. Without the wait, every transcript would lose its final API call: output tokens, model, and text.
+
+**Message counting:** `messageCount` and duration cover conversation messages only. Claude Code interleaves twelve other record types into the session file (`attachment`, `mode`, `permission-mode`, `last-prompt`, `ai-title`, `file-history-snapshot`, `summary`, `progress`, `system`, `queue-operation`, `pr-link`, `agent-name`); Snoop excludes all of them. None carries a message body.
 
 **Interrupt detection:** When you press ESC mid-response, Claude's last message contains a `tool_use` block that never received a `tool_result`. Snoop detects this pattern and inserts an interrupt marker before your next message.
 
-**Subagent capture:** The Task tool spawns subagents that run in separate contexts. Snoop loads their transcripts from Claude Code's internal `subagents/` log directory and merges them into the main transcript, tagged with `subagent: "agent-xxx"`.
+**Subagent capture:** The Task tool spawns subagents that run in separate contexts. Snoop loads their transcripts from Claude Code's internal `subagents/` log directory and merges them into the main transcript, tagged with `subagent: "agent-xxx"`. Agents spawned by the Workflow tool are captured too: they write to `subagents/workflows/wf_<runId>/`, so Snoop searches recursively. Each agent is named from its `agent-<id>.meta.json` sidecar, giving `subagents: ["backend-engineer", "backend-code-reviewer"]` rather than raw IDs.
+
+Workflow agents widen the gap between `tokens.output` and `tokens.dedupedOutput`, because a workflow never reports the per-agent usage aggregates that `tokens.output` depends on. See [Output Token Fields](#output-token-fields).
 
 **File lifecycle:**
 1. During session: partial transcripts saved as `.partial_{session_id}.jsonl`
@@ -64,7 +70,7 @@ claude --plugin-dir /path/to/snoop
 After each session, Snoop outputs a status line:
 
 ```
-[snoop] abc12345 | 2m 30s | 45 msgs | 150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr / 53% ce) | 5,000 out | 20% s46 / 80% o47 | 2 si (Explore, claude-code-guide) | 12 ti (Read, Edit, Bash)
+[snoop] abc12345 | 2m 30s | 45 msgs | 150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr / 53% ce) | 5,000 out (1,800 v / 3,200 r) | 20% s46 / 80% o47 | 2 si (Explore, claude-code-guide) | 12 ti (Read, Edit, Bash)
 ```
 
 | Field | Meaning |
@@ -78,12 +84,18 @@ After each session, Snoop outputs a status line:
 | `5,000 cw1h` | Cache write tokens (1-hour ephemeral tier) |
 | `80,000 cr` | Cache read tokens |
 | `53% ce` | Cache efficiency (cache read / total input) |
-| `5,000 out` | Output tokens |
+| `5,000 out` | Output tokens across main and subagent API calls |
+| `1,800 v` | Visible output: text and tool calls you can read |
+| `3,200 r` | Reasoning output: the rest, dominated by thinking blocks |
 | `20% s46 / 80% o47` | Output share by model, sorted descending. Only shown when multiple models are used (e.g. subagents on a different model). Shortcodes: `s`=sonnet, `o`=opus, `h`=haiku + major + minor version digits. |
 | `2 si (...)` | Subagent invocations with types (falls back to ID if unknown) |
 | `12 ti (...)` | Tool invocations with list of unique tools used |
 
-**Notes:** `cw1h` only appears when 1-hour tier has tokens. Model breakdown only appears when >1 model is present.
+`v` and `r` sum to the `out` total. A high `r` relative to `v` means the turn spent most of its output budget thinking rather than producing text and tool calls. The breakdown is omitted when `v` exceeds `out`, which happens on a turn dominated by one large tool call, because `v` is a 4-chars/token estimate while `out` is API-reported.
+
+A `⚠️ incomplete` marker means the turn's final assistant message never reached disk before the capture deadline, so the token counts are short. The meta record carries `incompleteCapture: true`.
+
+**Notes:** `cw1h` only appears when 1-hour tier has tokens. Model breakdown only appears when >1 model is present. The `(v / r)` breakdown is omitted when output is `0`.
 
 **With ESC interrupts:**
 ```
@@ -131,7 +143,21 @@ Place `.claude/snoop-context.json` in your project to set default meta values fo
 }
 ```
 
-Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+
+## Output Token Fields
+
+The meta record carries three output counts. They answer different questions, so they rarely match.
+
+| Field | Meaning |
+|-------|---------|
+| `tokens.output` | Legacy count. Main-agent API calls plus whatever usage the Task tool reported for subagents. Undercounts subagent work whenever `toolUseResult` carries no `agentId`, which is always the case for Workflow agents. Semantics frozen so old transcripts stay comparable. |
+| `tokens.dedupedOutput` | API-reported output tokens across main and subagent messages, deduplicated by `requestId`. The number shown as `out` in the status line. |
+| `tokens.visibleOutput` | Estimated tokens you can actually read: characters of `text` blocks plus each tool call's name and JSON input, at 4 chars/token. Thinking blocks excluded. |
+
+Reasoning output is the residual, `dedupedOutput - visibleOutput`, floored at `0`. Because `visibleOutput` is a 4-chars/token estimate rather than an API-reported count, that residual carries the estimate's error alongside the thinking tokens. Treat it as an indicator, not a measurement. It is most trustworthy on large turns, where the estimation error is small next to the totals.
+
+Assistant messages arrive as one JSONL line per content block. Those lines do not repeat the same `usage`: the intermediate ones carry a partial `output_tokens` and only the closing line carries the request's total, for example `1, 1, 1, 1, 276`. Both `dedupedOutput` and `visibleOutput` account for this. The first keeps one usage per `requestId`, the one with the largest `output_tokens`, which is the closing line. The second sums characters across lines and deduplicates only exact `uuid` repeats.
 
 ## Last Assistant Preview
 

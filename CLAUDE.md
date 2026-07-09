@@ -31,8 +31,12 @@ claude --plugin-dir /path/to/snoop
 | Event | Action |
 |-------|--------|
 | `UserPromptSubmit` | Detect ESC interrupt (pending `tool_use`), save partial transcript |
-| `Stop` | Merge partials, write meta record + messages, update `latest` pointer, prune to 10 files |
-| `StopFailure` | Same pipeline as `Stop`; fires instead of `Stop` on API errors (rate limit, 5xx, auth). Captured transcript has `0` output tokens, `0` tools, and no `lastAssistantPreview`. |
+| `Stop` | Wait for final assistant message, merge partials, write meta record + messages, update `latest` pointer, prune to 10 files |
+| `StopFailure` | Same pipeline as `Stop` minus the wait; fires instead of `Stop` on API errors (rate limit, 5xx, auth). Captured transcript never has `lastAssistantPreview`. Turns that fail before any assistant output also show `0` output tokens and `0` tools; turns that fail after tool calls retain both. |
+
+`Stop` fires before Claude Code flushes the turn's final assistant message to the session file. `readSettledTranscript()` polls for up to 1000 ms (50 ms interval) until the last conversation record is an assistant message with no pending `tool_use`, then returns whatever it has plus a `settled` flag. Without this the final API call's tokens, model, and text are lost. A line holding only a `tool_use` is mid-turn even though it is an assistant record, so `isFinalAssistantMessage()` rejects it. On timeout the meta record gets `incompleteCapture: true`.
+
+`shouldSkipMessage()` is an allow-list: it keeps `user` and `assistant` records carrying a `message` body, plus the `interrupt` marker snoop writes. Claude Code interleaves at least twelve bookkeeping record types (`attachment`, `mode`, `permission-mode`, `last-prompt`, `ai-title`, `file-history-snapshot`, `summary`, `progress`, `system`, `queue-operation`, `pr-link`, `agent-name`) that carry no `message` body. Naming them one by one meant each new type silently inflated `messageCount` and corrupted `timing` until someone noticed.
 
 ## Meta Tags
 
@@ -53,15 +57,15 @@ Place `.claude/snoop-context.json` in the project root to set default meta value
 ```
 
 Merge order: context file values < snoop meta tag values.
-Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## When Editing
 
 - **Status line format**: modify token/subagent/tool summary in `handleStop()`
-- **Token calculation**: `lib/tokens.mjs` - all counts from API-reported usage
+- **Token calculation**: `lib/tokens.mjs` - all counts from API-reported usage. `finalUsageByRequest()` keeps one usage per `requestId`, the one with the largest `output_tokens`. A request's lines carry partial counts until the closing one, and line order is not reliably chronological, so never sort by timestamp and never sum per line.
 - **Message filtering**: `lib/messages.mjs` - `streamlineMessage()` controls captured fields
 - **Meta tag parsing**: `lib/meta.mjs` - `scanForMetaTags()` extracts tag attributes
-- **Subagent loading**: `loadSubagentMessages()` in main script
+- **Subagent loading**: `loadSubagentMessages()` in main script. `findSubagentFiles()` recurses, since Task agents sit in `subagents/` but Workflow agents sit in `subagents/workflows/wf_<runId>/`. Names come from `agent-<id>.meta.json` sidecars via `loadAgentTypes()`, falling back to `buildAgentNameMap()`.
 
 ## Transcript Schema
 
@@ -73,14 +77,16 @@ JSONL with meta record first, then one message per line:
 |-------|------|-------------|
 | `type` | string | Always `"meta"` |
 | `transcriptId` | string | 8-char random ID |
-| `timing` | object | `start`, `end` (ISO), `duration` (formatted) |
+| `timing` | object | `start`, `end` (ISO), `duration` (formatted). A turn with one timestamped message closes against the hook's wall clock, so failed turns report elapsed time rather than `unknown` |
 | `messageCount` | number | Total messages |
 | `toolCount` | number | Total tool invocations |
 | `tools` | array | Unique tool names used |
 | `escInterrupts` | number | ESC interrupt count |
-| `tokens` | object | Token usage breakdown |
+| `tokens` | object | Token usage breakdown. Output counts: `output` (legacy, undercounts subagents), `dedupedOutput` (main + subagent, deduped by `requestId`), `visibleOutput` (estimated readable text and tool calls, thinking excluded) |
+| `outputByModel` | object | Per-model output token counts, deduped by `requestId` (optional) |
 | `subagents` | array | Subagent type names (if any) |
-| `lastAssistantPreview` | string | Single-line preview of final assistant message, ≤200 chars (optional, Claude Code 2.1.101+) |
+| `lastAssistantPreview` | string | Single-line preview of final assistant message, ≤200 chars (optional, Claude Code 2.1.101+). Absent means the turn produced no final assistant message, which is how failures are detected. Empty string means it produced a blank one |
+| `incompleteCapture` | boolean | Present and `true` only when the settle poll timed out. Token counts, `outputByModel`, and the preview are short |
 | `description` | string | From meta tag or context file (optional) |
 | `tags` | array | From meta tag or context file (optional) |
 | `*` | any | Dynamic attributes from meta tag or context file |
@@ -98,4 +104,4 @@ JSONL with meta record first, then one message per line:
 | `message.content` | array | Blocks: `tool_use`, `tool_result`, `text`, `thinking` |
 | `message.usage` | object | `input`, `output`, `cacheRead`, `cacheCreate`, `cache5m`, `cache1h` token counts |
 
-Tool results truncated to 500 chars. Interrupt markers have `type: "interrupt"`.
+Tool result text truncated to 500 chars, for both the string and array forms of `tool_result.content`. Image payloads are elided to `<elided N chars>`, since a base64 screenshot runs past 500,000 chars. Interrupt markers have `type: "interrupt"`.
