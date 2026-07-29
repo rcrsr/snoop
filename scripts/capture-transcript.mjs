@@ -27,6 +27,7 @@ import {
   calculateVisibleOutput,
   calculateDedupedOutput,
 } from './lib/tokens.mjs'
+import { calculateContextWindow, calculateSubagentContext } from './lib/context.mjs'
 import {
   scanForMetaTags,
   normalizeFilePath,
@@ -344,13 +345,18 @@ async function handleStop(
   tokens.visibleOutput = calculateVisibleOutput(combined)
   tokens.dedupedOutput = calculateDedupedOutput(combined)
   const outputByModel = calculateOutputByModel(combined)
+  // Occupancy comes from the whole session file, not `combined`. `combined` is
+  // this turn's flow, which is enough for the current reading but cannot see a
+  // peak or a compaction from earlier in the session. Subagent occupancy comes
+  // from `subagentMessages`, which carry the agent ids and their own models.
+  const contextWindow = calculateContextWindow(messages)
   const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort()
   // Sidecars only ever name ids this turn used, so skip the reads when it used none.
   const agentTypes = subagentIds.length ? loadAgentTypes(subagentFiles.sidecars) : new Map()
   const agentNameMap = subagentIds.length ? buildAgentNameMap(combined) : new Map()
-  const subagentNames = [
-    ...new Set(subagentIds.map((id) => agentTypes.get(id) || agentNameMap.get(id) || id)),
-  ].sort()
+  const nameForAgent = (id) => agentTypes.get(id) || agentNameMap.get(id) || null
+  const subagentNames = [...new Set(subagentIds.map((id) => nameForAgent(id) || id))].sort()
+  const subagentContext = calculateSubagentContext(subagentMessages, nameForAgent)
 
   // Build meta record
   const metaRecord = buildMetaRecord(
@@ -363,6 +369,8 @@ async function handleStop(
       escInterrupts: escCount,
       tokens,
       outputByModel,
+      contextWindow,
+      subagentContext,
       subagents: subagentNames,
       // A failed turn produced no final assistant message. Whatever Claude Code
       // hands the hook on StopFailure, the field stays absent: consumers key

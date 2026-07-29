@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `contextWindow` in the meta record: `used`, `peak`, `size`, `windowBasis`, `usedPercentage`, `peakPercentage`, `model`, `compactThreshold`, `headroom`, `compactions`. Occupancy is exact, taken from the same `input + cacheCreate + cacheRead` sum over the same final message that Claude Code's own context readout uses, and answers a different question from the token totals: totals sum every request and only grow, occupancy is one request's prompt size and drops on compaction, so a session can bill 4M tokens while occupying 90k. `peak` is the high-water mark — the only way to see how close a compacted session came to its limit — and each `compactions` entry records its trigger and the tokens that one compaction dropped. Meta record and transcript only, never the status line: a live statusline already shows context there; snoop's job is capturing it for later review.
+- `subagentContext` in the meta record: `agentId`, `peak`, `models`, `name` per subagent the turn spawned. A subagent runs its own window, so these are separate readings, not slices of the parent's — which is how a 367k Explore agent inside a 150k session is traced back to the agent type and model that produced it.
+- `context` on every captured message's `usage`: window occupancy at that request, so the transcript carries a context footprint per log item and the growth curve is readable straight off the file. On a subagent row it reads against that agent's own window. Zero on API-error rows.
+- Window-size inference with an honesty marker. The window is not recoverable from `message.model` — a session running `opus[1m]` records plain `claude-opus-5` (verified on a session that reached 989,865 tokens). Signals, strongest first: occupancy above 200k (proof), `--model` in the running process's argv via `CLAUDE_PID`, the `model` in settings.json. An explicit `--model` overrides settings, so `--model haiku` against a `[1m]` default correctly reads 200k. When nothing settles it, `windowBasis` says `assumed`: the tokens are exact, only the 200k denominator is a guess.
+- `transcript-reviewer` gains a "Context Pressure" issue category (peak near the limit, compactions explaining lost history), context metrics in its report, and a growth-curve survey command over the per-message footprint.
+
 ## [1.7.1] - 2026-07-08
 
 ### Fixed

@@ -159,6 +159,30 @@ Reasoning output is the residual, `dedupedOutput - visibleOutput`, floored at `0
 
 Assistant messages arrive as one JSONL line per content block. Those lines do not repeat the same `usage`: the intermediate ones carry a partial `output_tokens` and only the closing line carries the request's total, for example `1, 1, 1, 1, 276`. Both `dedupedOutput` and `visibleOutput` account for this. The first keeps one usage per `requestId`, the one with the largest `output_tokens`, which is the closing line. The second sums characters across lines and deduplicates only exact `uuid` repeats.
 
+## Context Usage
+
+The meta record carries a `contextWindow` object and, when the turn spawned subagents, a `subagentContext` array. Neither appears in the status line — a live statusline already shows context there; snoop's job is capturing it for later review.
+
+```json
+"contextWindow": {
+  "used": 150010, "peak": 989865, "size": 1000000, "windowBasis": "observed",
+  "usedPercentage": 15, "peakPercentage": 99, "model": "claude-opus-5",
+  "compactThreshold": 967000, "headroom": 816990,
+  "compactions": [{ "trigger": "auto", "preTokens": 998938, "postTokens": 32774, "droppedTokens": 966164 }]
+},
+"subagentContext": [
+  { "agentId": "agent-bbb2", "peak": 367005, "models": ["claude-sonnet-5"], "name": "Explore" }
+]
+```
+
+Occupancy answers a different question from the token totals. `tokens.totalInput` is everything the session ever billed and only grows; `contextWindow.used` is how much of the window the conversation occupies at the end of the turn, and it *drops* when the session compacts. A long session can bill millions of tokens while occupying 90k. `peak` is the high-water mark, the only way to see how close a compacted session came to its limit, and each `compactions` entry records what one compaction discarded.
+
+The count is exact — the same `input + cacheCreate + cacheRead` sum over the same message that Claude Code uses for its own context readout. The window size is the soft part, because a session running `opus[1m]` records itself as plain `claude-opus-5`. Snoop resolves it from occupancy above 200k (proof — nothing else reaches it), then a `--model` flag on the running process, then the `model` in `settings.json`; `windowBasis` says which signal won (`observed`, `argv`, `settings`), or `assumed` when none did — then the tokens are still exact, only the 200k denominator is a guess.
+
+Because subagents run their own windows, `subagentContext` readings are separate measurements rather than slices of the parent's — which is what makes a 367k Explore agent inside a 150k session traceable to the agent type and model that produced it.
+
+Every captured message also carries its own footprint: `message.usage.context` is the window occupancy at that request, so the growth curve reads straight off the transcript. On a subagent row it reads against that agent's own window.
+
 ## Last Assistant Preview
 
 When running on Claude Code 2.1.101+, the meta record includes a `lastAssistantPreview` field: a trimmed, single-line preview of the turn's final assistant message (up to 200 characters, with `…` suffix when truncated). Useful for quickly scanning transcripts in a list. Omitted from the record when Claude Code didn't supply the data (older versions, or StopFailure turns that ended before any assistant output).
