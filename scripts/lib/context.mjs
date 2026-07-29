@@ -150,14 +150,16 @@ export function calculateContextWindow(messages) {
 
   // Compaction discards context mid-session, so a bare occupancy reading
   // understates what the session actually held. Claude Code records the exact
-  // amounts it dropped; carry them so the reading can be explained.
+  // amounts, and this event's own drop is pre minus post. The recorded
+  // cumulativeDroppedTokens is not usable per event: it is a running total, so
+  // listing it per boundary would double-count every compaction after the first.
   const compactions = messages
     .filter((m) => m.subtype === 'compact_boundary' && m.compactMetadata)
-    .map((m) => ({
-      trigger: m.compactMetadata.trigger,
-      preTokens: m.compactMetadata.preTokens ?? 0,
-      postTokens: m.compactMetadata.postTokens ?? 0,
-      droppedTokens: m.compactMetadata.cumulativeDroppedTokens ?? 0,
+    .map(({ compactMetadata: c }) => ({
+      trigger: c.trigger,
+      preTokens: c.preTokens ?? 0,
+      postTokens: c.postTokens ?? 0,
+      droppedTokens: Math.max(0, (c.preTokens ?? 0) - (c.postTokens ?? 0)),
     }))
 
   return {
