@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Context-window occupancy in the status line: `ctx 15% (150k/1M) f5` after the message count — how full the window is at the end of the turn, the occupied tokens over the window size, and the model the reading is measured against. Occupancy is exact, taken from the same `input + cacheCreate + cacheRead` sum over the same final message that Claude Code's own context readout uses. Appends `peak N%` when the session has compacted (the only way to see how close it came to the limit) and a `−Nk` entry per compaction with its trigger and dropped tokens.
+- `contextWindow` in the meta record: `used`, `peak`, `size`, `windowBasis`, `usedPercentage`, `peakPercentage`, `model`, `compactThreshold`, `headroom`, `compactions`. Occupancy answers a different question from the token totals: totals sum every request and only grow, occupancy is one request's prompt size and drops on compaction, so a session can bill 4M tokens while occupying 90k.
+- Per-subagent context in the status line (`sub ctx: Explore s5 367k / claude-code-guide h45 48k`) and meta record (`subagentContext`: `agentId`, `peak`, `models`, `name`). A subagent runs its own window, so these are separate readings, not slices of the parent's — which is how a 367k Explore agent inside a 150k session is traced back to the agent type and model that produced it.
+- `context` on every captured message's `usage`: window occupancy at that request, so the transcript carries a context footprint per log item and the growth curve is readable straight off the file. On a subagent row it reads against that agent's own window.
+- Window-size inference with an honesty marker. The window is not recoverable from `message.model` — a session running `opus[1m]` records plain `claude-opus-5` (verified on a session that reached 989,865 tokens). Signals, strongest first: occupancy above 200k (proof), `--model` in the running process's argv via `CLAUDE_PID`, the `model` in settings.json. An explicit `--model` overrides settings, so `--model haiku` against a `[1m]` default correctly reads 200k. When nothing settles it, the percentage is prefixed `~` and `windowBasis` says `assumed`: the tokens are exact, only the denominator is a guess.
+- `transcript-reviewer` gains a "Context Pressure" issue category (peak near the limit, compactions explaining lost history), context metrics in its report, and a growth-curve survey command over the per-message footprint.
+
 ## [1.7.1] - 2026-07-08
 
 ### Fixed

@@ -150,6 +150,8 @@ const BUILTIN_KEYS = new Set([
   'escInterrupts',
   'tokens',
   'outputByModel',
+  'contextWindow',
+  'subagentContext',
   'subagents',
   'lastAssistantPreview',
   'incompleteCapture',
@@ -183,6 +185,16 @@ export function buildMetaRecord(stats, metaInfo, context = {}) {
 
   if (stats.outputByModel && Object.keys(stats.outputByModel).length > 0) {
     record.outputByModel = stats.outputByModel
+  }
+
+  // Null when the session file held no assistant usage yet, which is a real
+  // state for a turn that failed before its first API response.
+  if (stats.contextWindow) {
+    record.contextWindow = stats.contextWindow
+  }
+
+  if (stats.subagentContext && stats.subagentContext.length > 0) {
+    record.subagentContext = stats.subagentContext
   }
 
   if (stats.subagents && stats.subagents.length > 0) {
