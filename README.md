@@ -70,7 +70,7 @@ claude --plugin-dir /path/to/snoop
 After each session, Snoop outputs a status line:
 
 ```
-[snoop] abc12345 | 2m 30s | 45 msgs | ctx 18% (181k/1M) o5 | 150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr / 53% ce) | 5,000 out (1,800 v / 3,200 r) | 20% s46 / 80% o47 | sub ctx: Explore s5 366k / claude-code-guide h45 47k | 2 si (Explore, claude-code-guide) | 12 ti (Read, Edit, Bash)
+[snoop] abc12345 | 2m 30s | 45 msgs | 150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr / 53% ce) | 5,000 out (1,800 v / 3,200 r) | 20% s46 / 80% o47 | 2 si (Explore, claude-code-guide) | 12 ti (Read, Edit, Bash)
 ```
 
 | Field | Meaning |
@@ -78,7 +78,6 @@ After each session, Snoop outputs a status line:
 | `abc12345` | Transcript ID (use with `/snoop:review abc12345`) |
 | `2m 30s` | Session duration |
 | `45 msgs` | Total messages captured |
-| `ctx 18% (181k/1M) o5` | How full the context window is at the end of the turn, the occupied tokens over the window size, and the model the reading is measured against |
 | `150,000 in` | Total input tokens (prompt + cache read + cache write) |
 | `50,000 p` | Prompt tokens (non-cached input) |
 | `15,000 cw5m` | Cache write tokens (5-minute ephemeral tier) |
@@ -89,19 +88,8 @@ After each session, Snoop outputs a status line:
 | `1,800 v` | Visible output: text and tool calls you can read |
 | `3,200 r` | Reasoning output: the rest, dominated by thinking blocks |
 | `20% s46 / 80% o47` | Output share by model, sorted descending. Only shown when multiple models are used (e.g. subagents on a different model). Shortcodes: `s`=sonnet, `o`=opus, `h`=haiku + major + minor version digits. |
-| `sub ctx: ...` | Peak context each subagent of this turn occupied, with its type and model, largest first (top 4) |
 | `2 si (...)` | Subagent invocations with types (falls back to ID if unknown) |
 | `12 ti (...)` | Tool invocations with list of unique tools used |
-
-### Context usage
-
-`ctx` answers a different question from the token totals. `150,000 in` is everything the turn ever billed and only grows; `ctx` is how much of the window the conversation currently occupies, and it *drops* when the session compacts. A long session can bill millions of tokens while occupying 90k.
-
-The token count is exact — it is the same `input + cache write + cache read` sum over the same message that Claude Code uses for its own context readout. The window size is the soft part, because a session running `opus[1m]` records itself as plain `claude-opus-5`. Snoop resolves it from occupancy above 200k (proof — nothing else reaches it), then a `--model` flag on the running process, then the `model` in `settings.json`. When none of those settle it, the percentage is prefixed `~` to mark the window as assumed: the tokens are still exact, only the denominator is a guess.
-
-Two extra fields appear when they have something to say. `peak 99%` shows the high-water mark when the session has since compacted, which is the only way to see how close a compacted session came to its limit. `auto compact −966k` reports what a compaction discarded.
-
-Because subagents run their own windows, `sub ctx` readings are separate measurements rather than slices of the parent's — which is what makes a 366k Explore agent inside a 181k session traceable.
 
 `v` and `r` sum to the `out` total. A high `r` relative to `v` means the turn spent most of its output budget thinking rather than producing text and tool calls. The breakdown is omitted when `v` exceeds `out`, which happens on a turn dominated by one large tool call, because `v` is a 4-chars/token estimate while `out` is API-reported.
 
@@ -170,6 +158,30 @@ The meta record carries three output counts. They answer different questions, so
 Reasoning output is the residual, `dedupedOutput - visibleOutput`, floored at `0`. Because `visibleOutput` is a 4-chars/token estimate rather than an API-reported count, that residual carries the estimate's error alongside the thinking tokens. Treat it as an indicator, not a measurement. It is most trustworthy on large turns, where the estimation error is small next to the totals.
 
 Assistant messages arrive as one JSONL line per content block. Those lines do not repeat the same `usage`: the intermediate ones carry a partial `output_tokens` and only the closing line carries the request's total, for example `1, 1, 1, 1, 276`. Both `dedupedOutput` and `visibleOutput` account for this. The first keeps one usage per `requestId`, the one with the largest `output_tokens`, which is the closing line. The second sums characters across lines and deduplicates only exact `uuid` repeats.
+
+## Context Usage
+
+The meta record carries a `contextWindow` object and, when the turn spawned subagents, a `subagentContext` array. Neither appears in the status line — a live statusline already shows context there; snoop's job is capturing it for later review.
+
+```json
+"contextWindow": {
+  "used": 150010, "peak": 989865, "size": 1000000, "windowBasis": "observed",
+  "usedPercentage": 15, "peakPercentage": 99, "model": "claude-opus-5",
+  "compactThreshold": 967000, "headroom": 816990,
+  "compactions": [{ "trigger": "auto", "preTokens": 998938, "postTokens": 32774, "droppedTokens": 966164 }]
+},
+"subagentContext": [
+  { "agentId": "agent-bbb2", "peak": 367005, "models": ["claude-sonnet-5"], "name": "Explore" }
+]
+```
+
+Occupancy answers a different question from the token totals. `tokens.totalInput` is everything the session ever billed and only grows; `contextWindow.used` is how much of the window the conversation occupies at the end of the turn, and it *drops* when the session compacts. A long session can bill millions of tokens while occupying 90k. `peak` is the high-water mark, the only way to see how close a compacted session came to its limit, and each `compactions` entry records what one compaction discarded.
+
+The count is exact — the same `input + cacheCreate + cacheRead` sum over the same message that Claude Code uses for its own context readout. The window size is the soft part, because a session running `opus[1m]` records itself as plain `claude-opus-5`. Snoop resolves it from occupancy above 200k (proof — nothing else reaches it), then a `--model` flag on the running process, then the `model` in `settings.json`; `windowBasis` says which signal won (`observed`, `argv`, `settings`), or `assumed` when none did — then the tokens are still exact, only the 200k denominator is a guess.
+
+Because subagents run their own windows, `subagentContext` readings are separate measurements rather than slices of the parent's — which is what makes a 367k Explore agent inside a 150k session traceable to the agent type and model that produced it.
+
+Every captured message also carries its own footprint: `message.usage.context` is the window occupancy at that request, so the growth curve reads straight off the transcript. On a subagent row it reads against that agent's own window.
 
 ## Last Assistant Preview
 

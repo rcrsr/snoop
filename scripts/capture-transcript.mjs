@@ -27,12 +27,7 @@ import {
   calculateVisibleOutput,
   calculateDedupedOutput,
 } from './lib/tokens.mjs'
-import {
-  calculateContextWindow,
-  calculateSubagentContext,
-  formatContextSummary,
-  formatSubagentContext,
-} from './lib/context.mjs'
+import { calculateContextWindow, calculateSubagentContext } from './lib/context.mjs'
 import {
   scanForMetaTags,
   normalizeFilePath,
@@ -459,17 +454,12 @@ async function handleStop(
     subagentCount > 0 ? ` | ${subagentCount} si (${subagentNames.join(', ')})` : ''
   const toolInfo = toolCount > 0 ? ` | ${toolCount} ti (${toolList})` : ''
 
-  const contextSummary = formatContextSummary(contextWindow, modelShortcode)
-  const contextInfo = contextSummary ? ` | ${contextSummary}` : ''
-  const subagentCtxSummary = formatSubagentContext(subagentContext, modelShortcode)
-  const subagentCtxInfo = subagentCtxSummary ? ` | ${subagentCtxSummary}` : ''
-
   // Include custom path indicator if applicable
   const pathIndicator = isCustomPath ? ` → ${metaInfo.file}` : ''
 
   return {
     decision: 'approve',
-    systemMessage: `[snoop] ${transcriptId}${pathIndicator} | ${timing.durationFormatted} | ${truncated}${interrupted}${msgCount} msgs${contextInfo} | ${tokenSummary}${subagentCtxInfo}${subagentInfo}${toolInfo}`,
+    systemMessage: `[snoop] ${transcriptId}${pathIndicator} | ${timing.durationFormatted} | ${truncated}${interrupted}${msgCount} msgs | ${tokenSummary}${subagentInfo}${toolInfo}`,
   }
 }
 
