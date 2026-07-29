@@ -32,6 +32,7 @@ JSONL with one message per line:
 | `output` | Output tokens for this request |
 | `cacheRead` | Tokens read from prompt cache |
 | `cacheCreate` | Tokens written to prompt cache |
+| `context` | Window occupancy at this request (`input + cacheCreate + cacheRead`). Tracks how full the context was as the session progressed; a subagent row reads against that agent's own window. Zero means an API-error row, not an empty window |
 
 ## Large File Strategy
 
@@ -44,6 +45,7 @@ wc -l transcript.jsonl                                   # Message count
 jq -r '.type' transcript.jsonl | sort | uniq -c          # Type distribution
 jq -r '.subagent // empty' transcript.jsonl | sort -u    # List subagents
 jq -s 'map(select(.input)) | add | {input, output, cacheRead}' transcript.jsonl  # Token totals
+jq -r 'select(.message.usage.context > 0) | .message.usage.context' transcript.jsonl | cat -n | awk 'NR % 10 == 1'  # Context growth curve, every 10th request
 grep -n '"is_error":true' transcript.jsonl | cut -d: -f1 # Error line numbers
 ```
 
@@ -67,6 +69,7 @@ tail -20 transcript.jsonl | jq -s '.'         # Last messages
 | Inefficient Tools | Same file read multiple times, redundant searches |
 | Subagent Misuse | Excessive subagent spawns, wrong agent type for task, subagent errors |
 | Token Waste | High cache misses, redundant context, oversized tool results |
+| Context Pressure | `contextWindow.peakPercentage` near the limit, or a `compactions` entry. A compaction means the session lost history mid-run, which explains repeated work and forgotten decisions later in the turn. Cite the trigger and the dropped tokens |
 | Incomplete Work | Started tasks with no completion, missing verification |
 
 ## Turn Failures (API Error Detection)
@@ -204,6 +207,8 @@ Issue: Redundant file read — same file read twice in one response.
 - Input tokens: {total}
 - Output tokens: {total}
 - Cache read: {total}
+- Context used: {contextWindow.usedPercentage}% ({contextWindow.used} / {contextWindow.size}) on {contextWindow.model}
+- Context peak: {contextWindow.peakPercentage}%
 - Subagents: {count}
 - Tool calls: {count}
 - Errors: {count}

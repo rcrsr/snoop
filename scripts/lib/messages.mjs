@@ -155,13 +155,19 @@ export function streamlineMessage(msg) {
       result.message.model = msg.message.model;
     }
     if (msg.message.usage) {
+      const u = msg.message.usage;
       result.message.usage = {
-        input: msg.message.usage.input_tokens || 0,
-        output: msg.message.usage.output_tokens || 0,
-        cacheCreate: msg.message.usage.cache_creation_input_tokens || 0,
-        cacheRead: msg.message.usage.cache_read_input_tokens || 0,
-        cache5m: msg.message.usage.cache_creation?.ephemeral_5m_input_tokens || 0,
-        cache1h: msg.message.usage.cache_creation?.ephemeral_1h_input_tokens || 0,
+        input: u.input_tokens || 0,
+        output: u.output_tokens || 0,
+        cacheCreate: u.cache_creation_input_tokens || 0,
+        cacheRead: u.cache_read_input_tokens || 0,
+        cache5m: u.cache_creation?.ephemeral_5m_input_tokens || 0,
+        cache1h: u.cache_creation?.ephemeral_1h_input_tokens || 0,
+        // Context occupancy at this request: how full the window was, not what
+        // the request billed. For a subagent row this is the subagent's own
+        // window. Derivable from the fields above, but stored so every log item
+        // carries its footprint without consumers re-learning the formula.
+        context: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0),
       };
     }
   }
