@@ -8,6 +8,9 @@ Claude Code plugin that captures run transcripts for debugging and review.
 # Test locally
 claude --plugin-dir /path/to/snoop
 
+# Run tests
+node --test test/*.test.mjs
+
 # User commands
 /snoop:review              # Analyze last transcript
 /snoop:review abc12345     # Analyze specific transcript
@@ -64,7 +67,7 @@ Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `too
 - **Status line format**: modify token/subagent/tool summary in `handleStop()`
 - **Token calculation**: `lib/tokens.mjs` - all counts from API-reported usage. `finalUsageByRequest()` keeps one usage per `requestId`, the one with the largest `output_tokens`. A request's lines carry partial counts until the closing one, and line order is not reliably chronological, so never sort by timestamp and never sum per line.
 - **Message filtering**: `lib/messages.mjs` - `streamlineMessage()` controls captured fields
-- **Meta tag parsing**: `lib/meta.mjs` - `scanForMetaTags()` extracts tag attributes
+- **Meta tag parsing**: `lib/meta.mjs` - `scanForMetaTags()` extracts tag attributes. Always pass raw records, never streamlined ones: streamlining truncates tool results to 500 chars. ESC partials store their scan in a `meta-scan` record that `handleStop` strips on merge
 - **Subagent loading**: `loadSubagentMessages()` in main script. `findSubagentFiles()` recurses, since Task agents sit in `subagents/` but Workflow agents sit in `subagents/workflows/wf_<runId>/`. Names come from `agent-<id>.meta.json` sidecars via `loadAgentTypes()`, falling back to `buildAgentNameMap()`.
 
 ## Transcript Schema

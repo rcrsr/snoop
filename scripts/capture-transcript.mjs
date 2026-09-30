@@ -104,10 +104,12 @@ function loadAgentTypes(sidecars) {
 }
 
 /**
- * Streamlined messages from the agents this turn spawned. A session accumulates
- * every agent it ever ran, so files whose last write predates the turn cannot
- * hold a message inside it and are never opened. The caller still filters the
- * surviving messages by timestamp, since a file may straddle the boundary.
+ * Raw messages from the agents this turn spawned, each paired with its agent
+ * id. A session accumulates every agent it ever ran, so files whose last write
+ * predates the turn cannot hold a message inside it and are never opened. The
+ * caller still filters the surviving messages by timestamp, since a file may
+ * straddle the boundary. Messages stay raw so meta tags are scanned before
+ * streamlining truncates them.
  */
 async function loadSubagentMessages(transcripts, turnStart) {
   const allMessages = []
@@ -120,15 +122,16 @@ async function loadSubagentMessages(transcripts, turnStart) {
 
     for (const msg of messages) {
       if (shouldSkipMessage(msg)) continue
-
-      const streamlined = streamlineMessage(msg)
-      streamlined.subagent = agentId
-      allMessages.push(streamlined)
+      allMessages.push({ agentId, msg })
     }
   }
 
   return allMessages
 }
+
+// A partial holds streamlined records, so the meta tag scan of its raw segment
+// travels alongside them in a record of this type, dropped when merged.
+const PARTIAL_META_TYPE = 'meta-scan'
 
 // -----------------------------------------------------------------------------
 // Transcript Reading
@@ -208,11 +211,11 @@ async function handleUserPromptSubmit(transcriptPath, partialFile) {
   const startIndex = findLastUserPromptIndex(messages)
   if (startIndex < 0) return
 
-  // Extract and streamline the partial flow
-  const partial = messages
-    .slice(startIndex)
-    .filter((m) => !shouldSkipMessage(m))
-    .map(streamlineMessage)
+  // Extract the partial flow, scanning for meta tags before streamlining
+  const raw = messages.slice(startIndex).filter((m) => !shouldSkipMessage(m))
+  const partial = raw.map(streamlineMessage)
+  const meta = scanForMetaTags(raw)
+  if (meta) partial.push({ type: PARTIAL_META_TYPE, meta })
 
   // Create interrupt marker
   const marker = {
@@ -285,31 +288,39 @@ async function handleStop(
   // partial truncated by an interrupted write costs its last record rather than
   // throwing and stranding the file, which would fail every later Stop too.
   let combined = []
+  let partialMeta = null
   if (fs.existsSync(partialFile)) {
-    combined = await readJsonLines(partialFile)
+    for (const record of await readJsonLines(partialFile)) {
+      if (record.type === PARTIAL_META_TYPE) partialMeta = record.meta
+      else combined.push(record)
+    }
     fs.unlinkSync(partialFile)
   }
 
   // Add current segment
-  const current = messages
-    .slice(startIndex)
-    .filter((m) => !shouldSkipMessage(m))
-    .map(streamlineMessage)
+  const currentRaw = messages.slice(startIndex).filter((m) => !shouldSkipMessage(m))
+  const current = currentRaw.map(streamlineMessage)
   combined.push(...current)
 
   // Load and append subagent messages (only from current turn)
   const turnStart = current[0]?.timestamp ? new Date(current[0].timestamp).getTime() : 0
   const subagentFiles = walkSubagentFiles(subagentsDirFor(transcriptPath))
-  const subagentMessages = (
-    await loadSubagentMessages(subagentFiles.transcripts, turnStart)
-  ).filter((m) => {
-    if (!m.timestamp || !turnStart) return true
-    return new Date(m.timestamp).getTime() >= turnStart
-  })
+  const subagentRaw = (await loadSubagentMessages(subagentFiles.transcripts, turnStart)).filter(
+    ({ msg }) => {
+      if (!msg.timestamp || !turnStart) return true
+      return new Date(msg.timestamp).getTime() >= turnStart
+    }
+  )
+  const subagentMessages = subagentRaw.map(({ agentId, msg }) => ({
+    ...streamlineMessage(msg),
+    subagent: agentId,
+  }))
   combined.push(...subagentMessages)
 
-  // Scan for meta tags (last one wins) and load context file
-  const metaInfo = scanForMetaTags(combined)
+  // Scan raw records for meta tags, since streamlining truncates tool results.
+  // Order matches combined: partial, then current, then subagents; last wins.
+  const metaInfo =
+    scanForMetaTags([...currentRaw, ...subagentRaw.map(({ msg }) => msg)]) ?? partialMeta
   const snoopContext = loadSnoopContext(projectDir)
 
   // Determine output path

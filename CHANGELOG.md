@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- `<snoop:meta/>` tags ending past char 500 of a tool result were never found, so the transcript went to a random ID in `.claude/transcripts/` instead of the tag's `file` path (#7). Tags are now scanned on raw session records before `streamlineMessage` truncates tool results, for the main turn, subagents, and ESC partials. The 500-char truncation in the written transcript is unchanged.
+- Meta tags inside array-form `tool_result` content (`[{ type: "text", text }]`) are now detected.
+
+### Added
+
+- `test/meta.test.mjs`, run with `node --test test/*.test.mjs`.
+
 ## [1.7.1] - 2026-07-08
 
 ### Fixed
