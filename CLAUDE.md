@@ -50,7 +50,7 @@ Add `<snoop:meta key="value"/>` anywhere in conversation. Three reserved attribu
 - **tags**: Comma-separated tags, stored as array
 
 All other attributes pass through as raw strings to the meta record.
-Tool-result tags count only as a standalone line outside a ``` fence, and never from `Read`/`Grep`/`Glob`/`NotebookRead`/`WebFetch` (`standaloneTagLines()`, `CONTENT_TOOLS`). Otherwise a grepped docs example hijacks the capture path (#17). Prompts and assistant text are scanned whole.
+Tool-result tags count only when the line holds the tag alone or as a JSON string value (conduct prints `"metatag": "<snoop:meta .../>"`), outside a ``` fence, and never from `Read`/`Grep`/`Glob`/`NotebookRead`/`WebFetch` (`standaloneTagLines()`, `CONTENT_TOOLS`). Otherwise a grepped docs example hijacks the capture path (#17). Prompts and assistant text are scanned whole.
 Multiple tags per conversation: last one wins (no merging). Custom paths skip `latest` pointer and pruning.
 
 ## Context File

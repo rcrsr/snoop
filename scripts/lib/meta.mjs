@@ -33,11 +33,15 @@ function unescapeJsonString(str) {
 // Tools whose output is file or page content, never a tag emitted on purpose.
 const CONTENT_TOOLS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead', 'WebFetch'])
 
+// A tag alone on its line, or as a JSON string value: conduct's CLI prints
+// `"metatag": "<snoop:meta .../>",`, which reads that way once unescaped.
+const EMITTED_TAG_LINE = /^(?:"[\w-]+":\s*")?(<snoop:meta\s[^>]*\/>)(?:",?)?$/
+
 /**
- * Keep only the lines of tool output that could be a deliberately printed tag:
- * the tag alone on its line, outside a ``` fence. A CLI that registers a
- * transcript prints exactly that. `grep -n`, Read's line numbers, and a `cat`
- * of fenced docs all fail it, so a docs example no longer hijacks the capture.
+ * Keep only the lines of tool output that could be a deliberately printed tag,
+ * outside a ``` fence. `grep -n` and Read prefix the line with a path or line
+ * number, and a `cat` of docs shows the example fenced, so a docs example no
+ * longer hijacks the capture.
  */
 function standaloneTagLines(text) {
   const kept = []
@@ -48,7 +52,8 @@ function standaloneTagLines(text) {
       fenced = !fenced
       continue
     }
-    if (!fenced && /^<snoop:meta\s[^>]*\/>$/.test(trimmed)) kept.push(trimmed)
+    const match = fenced ? null : EMITTED_TAG_LINE.exec(trimmed)
+    if (match) kept.push(match[1])
   }
   return kept
 }

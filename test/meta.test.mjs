@@ -59,6 +59,11 @@ test('ignores tool results from content tools', () => {
   assert.equal(scanForMetaTags(withCall('Bash', TAG))?.file, 'transcripts/repro')
 })
 
+test('honors a tag emitted as a JSON value, as conduct prints it', () => {
+  const json = JSON.stringify({ file: 'x', metatag: TAG, sequence: 25 }, null, 2)
+  assert.equal(scanForMetaTags(withCall('Bash', json))?.file, 'transcripts/repro')
+})
+
 test('still honors tags in prompts and assistant text', () => {
   const inPrompt = { type: 'user', message: { role: 'user', content: `tag this ${TAG} please` } }
   const inText = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `ok ${TAG}` }] } }
