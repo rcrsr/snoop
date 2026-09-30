@@ -38,15 +38,31 @@ export function isInterruptMarker(msg) {
 }
 
 /**
- * Find index of last external user prompt
+ * Find index of the external user prompt that started the last turn.
+ *
+ * One turn can open with several prompt records sharing a `promptId`: a `!`
+ * command writes `<bash-input>` then `<bash-stdout>`. Taking the last one
+ * dropped the command, so walk back to the earliest record with that id.
+ * Records without a `promptId` (older sessions) keep the last-match behavior.
  */
 export function findLastUserPromptIndex(messages) {
+  let last = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (isExternalUserPrompt(messages[i])) {
-      return i;
+      last = i;
+      break;
     }
   }
-  return -1;
+  const promptId = messages[last]?.promptId;
+  if (!promptId) return last;
+
+  let first = last;
+  for (let i = last - 1; i >= 0; i--) {
+    if (!isExternalUserPrompt(messages[i])) continue;
+    if (messages[i].promptId !== promptId) break;
+    first = i;
+  }
+  return first;
 }
 
 /**

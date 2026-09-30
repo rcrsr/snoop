@@ -50,6 +50,7 @@ Add `<snoop:meta key="value"/>` anywhere in conversation. Three reserved attribu
 - **tags**: Comma-separated tags, stored as array
 
 All other attributes pass through as raw strings to the meta record.
+Tool-result tags count only as a standalone line outside a ``` fence, and never from `Read`/`Grep`/`Glob`/`NotebookRead`/`WebFetch` (`standaloneTagLines()`, `CONTENT_TOOLS`). Otherwise a grepped docs example hijacks the capture path (#17). Prompts and assistant text are scanned whole.
 Multiple tags per conversation: last one wins (no merging). Custom paths skip `latest` pointer and pruning.
 
 ## Context File
@@ -72,7 +73,7 @@ Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `con
 - **Message filtering**: `lib/messages.mjs` - `streamlineMessage()` controls captured fields
 - **Meta tag parsing**: `lib/meta.mjs` - `scanForMetaTags()` extracts tag attributes. Always pass raw records, never streamlined ones: streamlining truncates tool results to 500 chars. ESC partials store their scan in a `meta-scan` record that `handleStop` strips on merge
 - **Subagent loading**: `loadSubagentMessages()` in main script. `findSubagentFiles()` recurses, since Task agents sit in `subagents/` but Workflow agents sit in `subagents/workflows/wf_<runId>/`. Names come from `agent-<id>.meta.json` sidecars via `loadAgentTypes()`, falling back to `buildAgentNameMap()`. Subagent messages are bounded by `previousCaptureStart()`: the last `stop_hook_summary` naming snoop, minus its `durationMs`. Workflow agents run after `Workflow` returns `async_launched`, so bounding by the turn's first message lost 95% of them. The first capture in a session falls back to the turn start. `timing` uses main-chain records only.
-- **Turn start**: `isExternalUserPrompt()` rejects `isMeta` records. A Skill re-invocation injects an `isMeta` string after the prompt, which otherwise starts the capture mid-turn.
+- **Turn start**: `findLastUserPromptIndex()` walks back to the first external prompt sharing the last one's `promptId`, since a `!` command writes `<bash-input>` then `<bash-stdout>`. `isExternalUserPrompt()` rejects `isMeta` records. A Skill re-invocation injects an `isMeta` string after the prompt, which otherwise starts the capture mid-turn.
 
 ## Transcript Schema
 

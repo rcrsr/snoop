@@ -30,10 +30,35 @@ function unescapeJsonString(str) {
   return str.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\\\/g, '\\')
 }
 
+// Tools whose output is file or page content, never a tag emitted on purpose.
+const CONTENT_TOOLS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead', 'WebFetch'])
+
 /**
- * Extract text content from a message for scanning
+ * Keep only the lines of tool output that could be a deliberately printed tag:
+ * the tag alone on its line, outside a ``` fence. A CLI that registers a
+ * transcript prints exactly that. `grep -n`, Read's line numbers, and a `cat`
+ * of fenced docs all fail it, so a docs example no longer hijacks the capture.
  */
-function extractTextContent(msg) {
+function standaloneTagLines(text) {
+  const kept = []
+  let fenced = false
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('```')) {
+      fenced = !fenced
+      continue
+    }
+    if (!fenced && /^<snoop:meta\s[^>]*\/>$/.test(trimmed)) kept.push(trimmed)
+  }
+  return kept
+}
+
+/**
+ * Extract text content from a message for scanning.
+ * `toolNames` maps tool_use ids to tool names, so results from content tools
+ * are skipped. Results whose call is not in the list are still scanned.
+ */
+function extractTextContent(msg, toolNames) {
   const texts = []
 
   if (!msg.message?.content) return texts
@@ -53,15 +78,16 @@ function extractTextContent(msg) {
         // Unescape in case LLM shows JSON output containing the meta tag
         texts.push(unescapeJsonString(block.text))
       }
-      if (block.type === 'tool_result' && typeof block.content === 'string') {
+      if (block.type !== 'tool_result' || CONTENT_TOOLS.has(toolNames.get(block.tool_use_id))) continue
+      if (typeof block.content === 'string') {
         // Unescape JSON strings so meta tags with escaped quotes can be matched
-        texts.push(unescapeJsonString(block.content))
+        texts.push(...standaloneTagLines(unescapeJsonString(block.content)))
       }
-      if (block.type === 'tool_result' && Array.isArray(block.content)) {
+      if (Array.isArray(block.content)) {
         // Array-form results carry their text as [{ type: 'text', text }] blocks
         for (const inner of block.content) {
           if (inner?.type === 'text' && typeof inner.text === 'string') {
-            texts.push(unescapeJsonString(inner.text))
+            texts.push(...standaloneTagLines(unescapeJsonString(inner.text)))
           }
         }
       }
@@ -71,9 +97,24 @@ function extractTextContent(msg) {
   return texts
 }
 
+function collectToolNames(messages) {
+  const names = new Map()
+  for (const msg of messages) {
+    const content = msg.message?.content
+    if (msg.type !== 'assistant' || !Array.isArray(content)) continue
+    for (const block of content) {
+      if (block.type === 'tool_use') names.set(block.id, block.name)
+    }
+  }
+  return names
+}
+
 /**
  * Scan all message content for snoop:meta tags
  * Returns the last occurrence (last wins)
+ *
+ * Tags count from user prompts and assistant text anywhere, and from tool
+ * results only as a standalone line (see standaloneTagLines).
  *
  * Pass raw session records, never streamlined ones. streamlineMessage truncates
  * tool results to 500 chars, which drops any tag that ends past that offset.
@@ -81,9 +122,10 @@ function extractTextContent(msg) {
  */
 export function scanForMetaTags(messages) {
   let lastMeta = null
+  const toolNames = collectToolNames(messages)
 
   for (const msg of messages) {
-    const texts = extractTextContent(msg)
+    const texts = extractTextContent(msg, toolNames)
     for (const text of texts) {
       // Reset regex state for each text block
       SNOOP_META_PATTERN.lastIndex = 0

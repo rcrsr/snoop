@@ -37,6 +37,35 @@ test('finds a tag in an array-form tool result', () => {
   assert.equal(scanForMetaTags([msg])?.file, 'transcripts/repro')
 })
 
+const withCall = (name, content) => [
+  {
+    type: 'assistant',
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name, input: {} }] },
+  },
+  toolResult(content),
+]
+
+test('ignores a tag behind a grep -n line prefix', () => {
+  assert.equal(scanForMetaTags([toolResult(`README.md:131:${TAG}`)]), null)
+})
+
+test('ignores a tag inside a fenced block of tool output', () => {
+  assert.equal(scanForMetaTags([toolResult('**Example:**\n```\n' + TAG + '\n```\n')]), null)
+})
+
+test('ignores tool results from content tools', () => {
+  assert.equal(scanForMetaTags(withCall('Read', TAG)), null)
+  assert.equal(scanForMetaTags(withCall('Grep', TAG)), null)
+  assert.equal(scanForMetaTags(withCall('Bash', TAG))?.file, 'transcripts/repro')
+})
+
+test('still honors tags in prompts and assistant text', () => {
+  const inPrompt = { type: 'user', message: { role: 'user', content: `tag this ${TAG} please` } }
+  const inText = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `ok ${TAG}` }] } }
+  assert.equal(scanForMetaTags([inPrompt])?.file, 'transcripts/repro')
+  assert.equal(scanForMetaTags([inText])?.file, 'transcripts/repro')
+})
+
 // Session records shaped like Claude Code's: prompt, Bash call, result, reply.
 function sessionTurn(resultContent) {
   const ts = (s) => `2026-09-29T10:00:0${s}.000Z`
@@ -117,4 +146,11 @@ test('Stop keeps a tag found in an ESC partial segment', () => {
   assert.equal(readCustom(dir).description, 'repro')
   const lines = fs.readFileSync(path.join(dir, 'transcripts', 'repro.jsonl'), 'utf-8')
   assert.ok(!lines.includes('"meta-scan"'), 'partial meta record leaked into transcript')
+})
+
+test('Stop ignores a docs example grepped into Bash output (#17)', () => {
+  const { dir, transcript } = setup(sessionTurn(`README.md:131:${TAG}\nREADME.md:140:other`))
+  runHook(dir, transcript, 'Stop')
+  assert.ok(!fs.existsSync(path.join(dir, 'transcripts')), 'capture hijacked by grepped tag')
+  assert.ok(fs.existsSync(path.join(dir, '.claude', 'transcripts', 'latest')))
 })
