@@ -22,7 +22,7 @@ Snoop uses Claude Code's hook system to capture transcripts at two points:
 
 | Hook | Trigger | Action |
 |------|---------|--------|
-| `UserPromptSubmit` | User sends a message | Check for pending `tool_use` without `tool_result` (indicates ESC interrupt). Save partial transcript with interrupt marker. |
+| `UserPromptSubmit` | User sends a message | Check for an ESC interrupt: a pending `tool_use` without `tool_result`, or Claude Code's `[Request interrupted by user]` marker. Save partial transcript with interrupt marker. |
 | `Stop` | Session ends normally | Wait for the turn's final assistant message to reach the session file, merge any partial transcripts, write final JSONL, update `latest` pointer, prune old files. |
 | `StopFailure` | Session ends in API error (rate limit, 5xx, auth) | Same pipeline as `Stop`, minus the wait. Resulting transcript never has `lastAssistantPreview`, which is how `/snoop:review` identifies a failed turn. Turns that fail before any assistant output also show `0` output tokens and `0` tool calls; turns that fail after tool calls retain both. |
 
@@ -30,9 +30,9 @@ Snoop uses Claude Code's hook system to capture transcripts at two points:
 
 **Message counting:** `messageCount` and duration cover conversation messages only. Claude Code interleaves twelve other record types into the session file (`attachment`, `mode`, `permission-mode`, `last-prompt`, `ai-title`, `file-history-snapshot`, `summary`, `progress`, `system`, `queue-operation`, `pr-link`, `agent-name`); Snoop excludes all of them. None carries a message body.
 
-**Interrupt detection:** When you press ESC mid-response, Claude's last message contains a `tool_use` block that never received a `tool_result`. Snoop detects this pattern and inserts an interrupt marker before your next message.
+**Interrupt detection:** When you press ESC mid-response, Claude Code writes a `[Request interrupted by user]` marker, and if a tool was running, the last assistant message holds a `tool_use` that never received a `tool_result`. Snoop detects either sign and inserts an interrupt marker before your next message. The marker is the only sign of an ESC during a text or thinking reply.
 
-**Subagent capture:** The Task tool spawns subagents that run in separate contexts. Snoop loads their transcripts from Claude Code's internal `subagents/` log directory and merges them into the main transcript, tagged with `subagent: "agent-xxx"`. Agents spawned by the Workflow tool are captured too: they write to `subagents/workflows/wf_<runId>/`, so Snoop searches recursively. Each agent is named from its `agent-<id>.meta.json` sidecar, giving `subagents: ["backend-engineer", "backend-code-reviewer"]` rather than raw IDs.
+**Subagent capture:** The Task tool spawns subagents that run in separate contexts. Snoop loads their transcripts from Claude Code's internal `subagents/` log directory and merges them into the main transcript, tagged with `subagent: "agent-xxx"`. Agents spawned by the Workflow tool are captured too: they write to `subagents/workflows/wf_<runId>/`, so Snoop searches recursively. Each agent is named from its `agent-<id>.meta.json` sidecar, giving `subagents: ["backend-engineer", "backend-code-reviewer"]` rather than raw IDs. Workflow agents start after the Workflow call returns, so they often run between turns; each capture takes every subagent message written since the previous capture started, so that work lands in the next turn's transcript.
 
 Workflow agents widen the gap between `tokens.output` and `tokens.dedupedOutput`, because a workflow never reports the per-agent usage aggregates that `tokens.output` depends on. See [Output Token Fields](#output-token-fields).
 

@@ -3,13 +3,37 @@
  */
 
 /**
- * Check if message is an external user prompt
+ * Check if message is an external user prompt.
+ *
+ * `isMeta` records are text Claude Code injects into the turn, not prompts. A
+ * Skill re-invocation writes one as a plain string after the user's prompt and
+ * the Skill tool call, so counting it started the capture mid-turn and dropped
+ * the prompt, the call, and the first request's tokens.
  */
 export function isExternalUserPrompt(msg) {
   return (
     msg.type === "user" &&
     msg.userType === "external" &&
+    !msg.isMeta &&
     typeof msg.message?.content === "string"
+  );
+}
+
+const INTERRUPT_PREFIX = "[Request interrupted by user";
+
+/**
+ * Check if a record is the marker Claude Code writes when the user hits ESC:
+ * `[Request interrupted by user]`, or `... for tool use]` when a tool was
+ * running. Written as a `[{ type: "text" }]` block; the string form is matched
+ * too so older sessions still read.
+ */
+export function isInterruptMarker(msg) {
+  if (msg.type !== "user") return false;
+  const content = msg.message?.content;
+  if (typeof content === "string") return content.startsWith(INTERRUPT_PREFIX);
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (block) => block.type === "text" && typeof block.text === "string" && block.text.startsWith(INTERRUPT_PREFIX)
   );
 }
 
@@ -29,7 +53,7 @@ export function findLastUserPromptIndex(messages) {
  * Check if assistant message has tool_use blocks
  */
 export function hasToolUse(msg) {
-  if (msg.type !== "assistant" || !Array.isArray(msg.message?.content)) {
+  if (msg?.type !== "assistant" || !Array.isArray(msg.message?.content)) {
     return false;
   }
   return msg.message.content.some((block) => block.type === "tool_use");

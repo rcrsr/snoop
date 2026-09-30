@@ -34,13 +34,13 @@ node --test test/*.test.mjs
 
 | Event | Action |
 |-------|--------|
-| `UserPromptSubmit` | Detect ESC interrupt (pending `tool_use`), save partial transcript |
+| `UserPromptSubmit` | Detect ESC interrupt (pending `tool_use` or `[Request interrupted by user` marker), save partial transcript |
 | `Stop` | Wait for final assistant message, merge partials, write meta record + messages, update `latest` pointer, prune to 10 files |
 | `StopFailure` | Same pipeline as `Stop` minus the wait; fires instead of `Stop` on API errors (rate limit, 5xx, auth). Captured transcript never has `lastAssistantPreview`. Turns that fail before any assistant output also show `0` output tokens and `0` tools; turns that fail after tool calls retain both. |
 
 `Stop` fires before Claude Code flushes the turn's final assistant message to the session file. `readSettledTranscript()` polls for up to 1000 ms (50 ms interval) until the last conversation record is an assistant message with no pending `tool_use`, then returns whatever it has plus a `settled` flag. Without this the final API call's tokens, model, and text are lost. A line holding only a `tool_use` is mid-turn even though it is an assistant record, so `isFinalAssistantMessage()` rejects it. On timeout the meta record gets `incompleteCapture: true`.
 
-`shouldSkipMessage()` is an allow-list: it keeps `user` and `assistant` records carrying a `message` body, plus the `interrupt` marker snoop writes. Claude Code interleaves at least twelve bookkeeping record types (`attachment`, `mode`, `permission-mode`, `last-prompt`, `ai-title`, `file-history-snapshot`, `summary`, `progress`, `system`, `queue-operation`, `pr-link`, `agent-name`) that carry no `message` body. Naming them one by one meant each new type silently inflated `messageCount` and corrupted `timing` until someone noticed.
+`shouldSkipMessage()` is an allow-list: it keeps `user` and `assistant` records carrying a `message` body, plus the `interrupt` marker snoop writes. Claude Code interleaves at least sixteen bookkeeping record types (`attachment`, `mode`, `permission-mode`, `last-prompt`, `ai-title`, `file-history-snapshot`, `file-history-delta`, `summary`, `progress`, `system`, `queue-operation`, `pr-link`, `agent-name`, `atis-latch`, `cost-state`, `fork-context-ref`) that carry no `message` body. Naming them one by one meant each new type silently inflated `messageCount` and corrupted `timing` until someone noticed.
 
 ## Meta Tags
 
@@ -71,7 +71,8 @@ Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `con
 - **Window size**: transcript only. `MODEL_WINDOWS` in `lib/context.mjs` maps family-version to the model's maximum input window from Anthropic's model table; add a row when a model ships. `windowBasis` is `model` (listed), `observed` (unlisted, a reading on that same model passed 200k), or `unknown` (size and percentages `null`). The window follows the reading row's model, never a session-wide peak, so a `/model` switch is handled. Never read argv or `settings.json`: `ANTHROPIC_MODEL` and `/model` override both without a trace.
 - **Message filtering**: `lib/messages.mjs` - `streamlineMessage()` controls captured fields
 - **Meta tag parsing**: `lib/meta.mjs` - `scanForMetaTags()` extracts tag attributes. Always pass raw records, never streamlined ones: streamlining truncates tool results to 500 chars. ESC partials store their scan in a `meta-scan` record that `handleStop` strips on merge
-- **Subagent loading**: `loadSubagentMessages()` in main script. `findSubagentFiles()` recurses, since Task agents sit in `subagents/` but Workflow agents sit in `subagents/workflows/wf_<runId>/`. Names come from `agent-<id>.meta.json` sidecars via `loadAgentTypes()`, falling back to `buildAgentNameMap()`.
+- **Subagent loading**: `loadSubagentMessages()` in main script. `findSubagentFiles()` recurses, since Task agents sit in `subagents/` but Workflow agents sit in `subagents/workflows/wf_<runId>/`. Names come from `agent-<id>.meta.json` sidecars via `loadAgentTypes()`, falling back to `buildAgentNameMap()`. Subagent messages are bounded by `previousCaptureStart()`: the last `stop_hook_summary` naming snoop, minus its `durationMs`. Workflow agents run after `Workflow` returns `async_launched`, so bounding by the turn's first message lost 95% of them. The first capture in a session falls back to the turn start. `timing` uses main-chain records only.
+- **Turn start**: `isExternalUserPrompt()` rejects `isMeta` records. A Skill re-invocation injects an `isMeta` string after the prompt, which otherwise starts the capture mid-turn.
 
 ## Transcript Schema
 
