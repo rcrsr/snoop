@@ -33,8 +33,8 @@ function unescapeJsonString(str) {
 // Tools whose output is file or page content, never a tag emitted on purpose.
 const CONTENT_TOOLS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead', 'WebFetch'])
 
-// A tag alone on its line, or as a JSON string value: conduct's CLI prints
-// `"metatag": "<snoop:meta .../>",`, which reads that way once unescaped.
+// A tag alone on its line, or as a JSON string value: a CLI printing JSON
+// emits `"metatag": "<snoop:meta .../>",`, which reads that way once unescaped.
 const EMITTED_TAG_LINE = /^(?:"[\w-]+":\s*")?(<snoop:meta\s[^>]*\/>)(?:",?)?$/
 
 /**

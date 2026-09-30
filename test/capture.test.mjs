@@ -107,7 +107,7 @@ test('an isMeta string after the prompt does not start the turn', () => {
     prompt('p1', 0, 'file it'),
     assistant('a1', 1, 'r1', toolUse('t1', 'Skill')),
     toolResult('u1', 2, 't1'),
-    { ...prompt('m1', 3, '(Re-invocation of /conduct:open-issue ...)'), isMeta: true },
+    { ...prompt('m1', 3, '(Re-invocation of /example:skill ...)'), isMeta: true },
   ]
   assert.equal(findLastUserPromptIndex(records), 0)
 
