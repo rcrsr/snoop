@@ -10,10 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `<snoop:meta/>` tags ending past char 500 of a tool result were never found, so the transcript went to a random ID in `.claude/transcripts/` instead of the tag's `file` path (#7). Tags are now scanned on raw session records before `streamlineMessage` truncates tool results, for the main turn, subagents, and ESC partials. The 500-char truncation in the written transcript is unchanged.
 - Meta tags inside array-form `tool_result` content (`[{ type: "text", text }]`) are now detected.
-- Workflow agents were never captured. `Workflow` returns `async_launched` and its agents run after the turn's Stop, so the turn-start bound dropped 740 of 775 real workflow agent messages (95%). Each capture now takes subagent messages written since the previous snoop capture started, read from Claude Code's `stop_hook_summary` record, which also recovers subagent work inside ESC-interrupted segments. `timing` now spans main-chain records only.
-- ESC during a text or thinking reply lost the interrupted segment and undercounted `escInterrupts`: 8 of 27 real interrupts. Detection now also checks for Claude Code's `[Request interrupted by user]` marker, not only a pending `tool_use`.
-- A Skill re-invocation started the capture mid-turn, dropping the user's prompt, the `Skill` call, and the first request's tokens (2 of 54 recent captures). Claude Code injects an `isMeta` string after the prompt, which was taken as the prompt. `isMeta` records no longer start a turn.
-- `test/capture.test.mjs` covers turn start, ESC detection, and the subagent window.
+- Workflow agents were never captured. `Workflow` returns `async_launched` and its agents run after the turn's Stop, so the turn-start bound dropped 740 of 775 real workflow agent messages (95%). Each capture now takes subagent messages written since the previous snoop capture started, read from Claude Code's `stop_hook_summary` record, which also recovers subagent work inside ESC-interrupted segments. `timing` now spans main-chain records only. ([#16](https://github.com/rcrsr/snoop/pull/16))
+- ESC during a text or thinking reply lost the interrupted segment and undercounted `escInterrupts`: 8 of 27 real interrupts. Detection now also checks for Claude Code's `[Request interrupted by user]` marker, not only a pending `tool_use`. ([#16](https://github.com/rcrsr/snoop/pull/16))
+- A Skill re-invocation started the capture mid-turn, dropping the user's prompt, the `Skill` call, and the first request's tokens (2 of 54 recent captures). Claude Code injects an `isMeta` string after the prompt, which was taken as the prompt. `isMeta` records no longer start a turn. ([#16](https://github.com/rcrsr/snoop/pull/16))
+- `test/capture.test.mjs` covers turn start, ESC detection, and the subagent window. ([#16](https://github.com/rcrsr/snoop/pull/16))
 
 ### Added
 
