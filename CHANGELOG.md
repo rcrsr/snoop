@@ -20,6 +20,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Test coverage:** `test/messages.test.mjs` covers the skip filter against all sixteen known bookkeeping record types, tool-result truncation, image elision, and agent name mapping. `test/tokens.test.mjs` covers closing-line selection, per-model output, and the visible-output estimate. `test/capture.test.mjs` covers the settle poll (settled and timed out) and `StopFailure` before and after tool calls. 50 tests in total (#13). ([#21](https://github.com/rcrsr/snoop/pull/21))
 - `test/capture.test.mjs` covers turn start, ESC detection, and the subagent window. ([#16](https://github.com/rcrsr/snoop/pull/16))
 
+### Changed
+
+- **Reviewer model:** `transcript-reviewer` runs on `sonnet` (Claude Sonnet 5.5) instead of `haiku`, since root-cause analysis of a turn is judgment work. It runs at `effort: medium`, the level the Claude Sonnet 5.5 guidance recommends starting agentic multistep tool use at. The `/snoop:review` skill uses the same model and effort. ([#23](https://github.com/rcrsr/snoop/pull/23))
+
 ### Added
 
 - **Compatibility statement:** README names Claude Code 2.1.285 as the validated version and lists the minimum version for each version-gated feature. ([#21](https://github.com/rcrsr/snoop/pull/21))

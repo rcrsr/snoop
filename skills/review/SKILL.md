@@ -2,6 +2,8 @@
 name: review
 description: Analyze Claude Code transcripts and generate detailed post-mortem review reports. Use when the user asks to review, debug, or audit a past session.
 argument-hint: "[transcript-id] [concern]"
+model: sonnet
+effort: medium
 ---
 
 # Transcript Review
