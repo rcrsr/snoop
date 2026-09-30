@@ -99,7 +99,7 @@ JSONL with meta record first, then one message per line:
 | `subagentContext` | array | Per-subagent occupancy: `agentId`, `peak`, `size`, `peakPercentage`, `models`, plus optional `name`, `description` (the call's task label), `spawnDepth`, `isFork` (only when `true`), `durationMs` (from the Agent result; absent for workflow agents) |
 | `workflows` | array | Workflow runs this capture touched, launched this turn or with agent messages in it: `runId`, `workflowName` (optional) |
 | `subagents` | array | Subagent type names (if any) |
-| `lastAssistantPreview` | string | Single-line preview of final assistant message, ≤200 chars (optional, Claude Code 2.1.101+). Absent means the turn produced no final assistant message, which is how failures are detected. Empty string means it produced a blank one |
+| `lastAssistantPreview` | string | Single-line preview of final assistant message, ≤200 chars (optional, Claude Code 2.1.101+). Absent means the turn produced no final assistant message, which is how failures are detected, except on a `trailingCapture` record, which has no turn. Empty string means it produced a blank one |
 | `incompleteCapture` | boolean | Present and `true` only when the settle poll timed out. Token counts, `outputByModel`, and the preview are short |
 | `trailingCapture` | boolean | Present and `true` only on a `SessionEnd` capture of subagent work after the last `Stop` |
 | `description` | string | From meta tag or context file (optional) |
