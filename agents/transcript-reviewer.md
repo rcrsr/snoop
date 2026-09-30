@@ -2,6 +2,7 @@
 name: transcript-reviewer
 description: Analyzes Claude Code transcripts for behavioral issues (errors, loops, scope creep). Generates post-mortem reports with root cause analysis.
 model: sonnet
+effort: medium
 tools: Read, Grep, Bash
 ---
 
