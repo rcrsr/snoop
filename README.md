@@ -150,7 +150,7 @@ Place `.claude/snoop-context.json` in your project to set default meta values fo
 }
 ```
 
-Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `outputBySpeed`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`, `incompleteCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `outputBySpeed`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `workflows`, `lastAssistantPreview`, `incompleteCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## Output Token Fields
 
@@ -182,13 +182,16 @@ The meta record carries a `contextWindow` object and, when the turn spawned suba
   "compactions": [{ "trigger": "auto", "preTokens": 998938, "postTokens": 32774, "droppedTokens": 966164 }]
 },
 "subagentContext": [
-  { "agentId": "agent-bbb2", "peak": 367005, "size": 1000000, "peakPercentage": 37, "models": ["claude-sonnet-5"], "name": "Explore" }
+  { "agentId": "agent-bbb2", "peak": 367005, "size": 1000000, "peakPercentage": 37, "models": ["claude-sonnet-5"],
+    "name": "Explore", "description": "Map the auth module", "spawnDepth": 1, "durationMs": 95376 }
 ]
 ```
 
 Occupancy answers a different question from the token totals. `tokens.totalInput` is everything the session ever billed and only grows; `contextWindow.used` is how much of the window the conversation occupies at the end of the turn, and it *drops* when the session compacts. A long session can bill millions of tokens while occupying 90k. `peak` is the high-water mark, the only way to see how close a compacted session came to its limit, and each `compactions` entry records what one compaction discarded.
 
 The count is exact — the same `input + cacheCreate + cacheRead` sum over the same message that Claude Code uses for its own context readout. The window size comes from the transcript too: `message.model` names the model, and snoop looks up that model's maximum input window (`windowBasis: "model"`). A model snoop does not list yet resolves to 1M once one of its own readings passes 200k (`observed`); until then `size` and the percentages are `null` (`unknown`) while the token counts stay exact. The window follows the model of the row being measured, so a `/model` switch mid-session is handled, and `peakModel` names the model the peak was measured on.
+
+Each entry also carries the agent's `description` (its task label, which tells apart parallel agents of one type), `spawnDepth`, `isFork` for forked agents, and `durationMs` when the Agent result reports it. Workflow runs the capture touched appear in a top-level `workflows` array as `{ runId, workflowName }`.
 
 Because subagents run their own windows, `subagentContext` readings are separate measurements rather than slices of the parent's — which is what makes a 367k Explore agent inside a 150k session traceable to the agent type and model that produced it.
 

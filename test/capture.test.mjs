@@ -233,3 +233,46 @@ test('the first capture in a session bounds subagents by the turn start', () => 
   const { meta } = readCapture(dir)
   assert.equal(meta.subagents, undefined)
 })
+
+test('subagentContext carries sidecar details and meta names workflow runs', () => {
+  const launched = { ...toolResult('u1', 2, 't1'), toolUseResult: { runId: 'wf_abc', workflowName: 'nightly', status: 'async_launched' } }
+  const agentDone = {
+    ...toolResult('u2', 64, 't2'),
+    toolUseResult: { agentId: 'f1', agentType: 'fork', status: 'completed', totalDurationMs: 4200 },
+  }
+  const { dir, transcript } = setup([
+    prompt('p1', 0, 'run the workflow'),
+    assistant('a1', 1, 'r1', toolUse('t1', 'Workflow')),
+    launched,
+    assistant('a2', 3, 'r2', text('launched')),
+    stopSummary(5),
+    prompt('p2', 60, 'fork one'),
+    assistant('a3', 61, 'r3', toolUse('t2', 'Agent')),
+    agentDone,
+    assistant('a4', 65, 'r4', text('done')),
+  ])
+  const sub = path.join(dir, 'session', 'subagents')
+  writeJsonl(path.join(sub, 'workflows', 'wf_abc', 'agent-x1.jsonl'), [
+    assistant('s1', 30, 'rs1', text('reviewed'), { isSidechain: true }),
+  ])
+  writeJsonl(path.join(sub, 'workflows', 'wf_abc', 'agent-x1.meta.json'), [
+    { agentType: 'reviewer', description: 'review:W-1', spawnDepth: 1 },
+  ])
+  writeJsonl(path.join(sub, 'agent-f1.jsonl'), [assistant('s2', 62, 'rs2', text('forked'), { isSidechain: true })])
+  writeJsonl(path.join(sub, 'agent-f1.meta.json'), [
+    { agentType: 'fork', isFork: true, model: 'inherit', description: 'ADR check', spawnDepth: 1 },
+  ])
+
+  runHook(dir, transcript, 'Stop')
+  const { meta } = readCapture(dir)
+  // The run launched in turn 1 is still named from the session's Workflow result.
+  assert.deepEqual(meta.workflows, [{ runId: 'wf_abc', workflowName: 'nightly' }])
+  const byId = Object.fromEntries(meta.subagentContext.map((a) => [a.agentId, a]))
+  assert.deepEqual(
+    (({ name, description, spawnDepth, isFork, durationMs }) => ({ name, description, spawnDepth, isFork, durationMs }))(byId['agent-x1']),
+    { name: 'reviewer', description: 'review:W-1', spawnDepth: 1, isFork: undefined, durationMs: undefined }
+  )
+  assert.equal(byId['agent-f1'].isFork, true)
+  assert.equal(byId['agent-f1'].durationMs, 4200)
+  assert.equal(byId['agent-f1'].description, 'ADR check')
+})

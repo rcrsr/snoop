@@ -212,6 +212,7 @@ const BUILTIN_KEYS = new Set([
   'contextWindow',
   'subagentContext',
   'subagents',
+  'workflows',
   'lastAssistantPreview',
   'incompleteCapture',
 ])
@@ -262,6 +263,10 @@ export function buildMetaRecord(stats, metaInfo, context = {}) {
 
   if (stats.subagents && stats.subagents.length > 0) {
     record.subagents = stats.subagents
+  }
+
+  if (stats.workflows && stats.workflows.length > 0) {
+    record.workflows = stats.workflows
   }
 
   // Absent means the turn produced no final assistant message. An empty string

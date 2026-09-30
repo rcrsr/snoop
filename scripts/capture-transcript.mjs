@@ -87,25 +87,49 @@ function mtimeOf(file) {
 }
 
 /**
- * Map agentId -> agentType from the agent-<id>.meta.json sidecar Claude Code
+ * Map agentId -> sidecar fields from the agent-<id>.meta.json file Claude Code
  * writes beside each agent transcript. Covers Task and Workflow agents alike,
  * unlike buildAgentNameMap(), which can only name agents reached through a
- * Task tool_use / toolUseResult pair.
+ * Task tool_use / toolUseResult pair. `description` is the call's task label,
+ * which tells apart parallel agents of one type.
  */
-function loadAgentTypes(sidecars) {
-  const types = new Map()
+function loadAgentSidecars(sidecars) {
+  const agents = new Map()
 
   for (const file of sidecars) {
     try {
-      const { agentType } = JSON.parse(fs.readFileSync(file, 'utf-8'))
-      if (agentType) types.set(path.basename(file, '.meta.json'), agentType)
+      const { agentType, description, spawnDepth, isFork } = JSON.parse(fs.readFileSync(file, 'utf-8'))
+      agents.set(path.basename(file, '.meta.json'), { agentType, description, spawnDepth, isFork })
     } catch {
       // Unreadable or malformed sidecar: fall back to the tool_use pairing
     }
   }
 
-  return types
+  return agents
 }
+
+/**
+ * Durations and workflow names from the session's toolUseResult records. An
+ * Agent result carries `totalDurationMs`; a Workflow result carries `runId`
+ * and `workflowName`. Workflow agents often finish turns after their launch,
+ * so the whole session is searched, not only this turn.
+ */
+function collectRunInfo(messages) {
+  const agentDurations = new Map()
+  const workflowNames = new Map()
+  for (const msg of messages) {
+    const result = msg.toolUseResult
+    if (!result || typeof result !== 'object') continue
+    if (result.agentId && Number.isFinite(result.totalDurationMs)) {
+      agentDurations.set('agent-' + result.agentId, result.totalDurationMs)
+    }
+    if (result.runId && result.workflowName) workflowNames.set(result.runId, result.workflowName)
+  }
+  return { agentDurations, workflowNames }
+}
+
+// Workflow agents sit in subagents/workflows/<runId>/.
+const workflowRunIdOf = (file) => file.match(/[\\/]workflows[\\/](wf_[^\\/]+)[\\/]/)?.[1] ?? null
 
 /**
  * Raw messages from the agents this turn spawned, each paired with its agent
@@ -122,11 +146,12 @@ async function loadSubagentMessages(transcripts, turnStart) {
     if (turnStart && mtimeOf(file) < turnStart) continue
 
     const agentId = path.basename(file, '.jsonl')
+    const runId = workflowRunIdOf(file)
     const messages = await readJsonLines(file)
 
     for (const msg of messages) {
       if (shouldSkipMessage(msg)) continue
-      allMessages.push({ agentId, msg })
+      allMessages.push({ agentId, runId, msg })
     }
   }
 
@@ -405,11 +430,30 @@ async function handleStop(
   const contextWindow = calculateContextWindow(messages)
   const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort()
   // Sidecars only ever name ids this turn used, so skip the reads when it used none.
-  const agentTypes = subagentIds.length ? loadAgentTypes(subagentFiles.sidecars) : new Map()
+  const sidecars = subagentIds.length ? loadAgentSidecars(subagentFiles.sidecars) : new Map()
   const agentNameMap = subagentIds.length ? buildAgentNameMap(combined) : new Map()
-  const nameForAgent = (id) => agentTypes.get(id) || agentNameMap.get(id) || null
+  const nameForAgent = (id) => sidecars.get(id)?.agentType || agentNameMap.get(id) || null
   const subagentNames = [...new Set(subagentIds.map((id) => nameForAgent(id) || id))].sort()
-  const subagentContext = calculateSubagentContext(subagentMessages, nameForAgent)
+  const { agentDurations, workflowNames } = collectRunInfo(messages)
+  const detailsForAgent = (id) => {
+    const sidecar = sidecars.get(id) ?? {}
+    return {
+      ...(sidecar.description && { description: sidecar.description }),
+      ...(Number.isFinite(sidecar.spawnDepth) && { spawnDepth: sidecar.spawnDepth }),
+      ...(sidecar.isFork === true && { isFork: true }),
+      ...(agentDurations.has(id) && { durationMs: agentDurations.get(id) }),
+    }
+  }
+  const subagentContext = calculateSubagentContext(subagentMessages, nameForAgent, detailsForAgent)
+
+  // Workflow runs this capture touched: launched this turn, or with agent
+  // messages in it. A run launched earlier still has its name in the session.
+  const runIds = new Set(subagentRaw.map(({ runId }) => runId).filter(Boolean))
+  for (const msg of currentRaw) if (msg.toolUseResult?.runId) runIds.add(msg.toolUseResult.runId)
+  const workflows = [...runIds].sort().map((runId) => ({
+    runId,
+    ...(workflowNames.has(runId) && { workflowName: workflowNames.get(runId) }),
+  }))
 
   // Build meta record
   const metaRecord = buildMetaRecord(
@@ -426,6 +470,7 @@ async function handleStop(
       contextWindow,
       subagentContext,
       subagents: subagentNames,
+      workflows,
       // A failed turn produced no final assistant message. Whatever Claude Code
       // hands the hook on StopFailure, the field stays absent: consumers key
       // failure detection on that absence.
