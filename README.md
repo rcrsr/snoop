@@ -53,6 +53,18 @@ Workflow agents widen the gap between `tokens.output` and `tokens.dedupedOutput`
 claude --plugin-dir /path/to/snoop
 ```
 
+## Compatibility
+
+Validated against **Claude Code 2.1.285** (2026-09-29): hook payloads, session record types, usage fields, and agent sidecars were checked against real 2.1.285 sessions. Older versions work with fewer fields:
+
+| Feature | Needs |
+|---------|-------|
+| `/snoop:review` skill | 2.1.3+ |
+| `lastAssistantPreview` | 2.1.101+ |
+| Exact thinking tokens (`tokens.thinkingOutput`) | 2.1.284+ |
+
+Newer versions may add record types or usage fields. Snoop's allow-list filter ignores unknown record types rather than miscounting them.
+
 ## Quick Start
 
 ```bash
