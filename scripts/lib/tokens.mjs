@@ -149,6 +149,38 @@ export function calculateDedupedOutput(messages) {
   return total
 }
 
+const thinkingOf = (usage) => usage.output_tokens_details?.thinking_tokens ?? usage.thinking
+
+/**
+ * Exact thinking tokens, one final usage per request, main and subagent alike.
+ * `exact` is true only when every request reported the count: subagent rows
+ * carry it about 40% of the time, and a partial sum would pass for the whole.
+ */
+export function calculateThinkingOutput(messages) {
+  let total = 0
+  let reported = 0
+  const byRequest = finalUsageByRequest(messages)
+  for (const { usage } of byRequest.values()) {
+    const thinking = thinkingOf(usage)
+    if (typeof thinking !== 'number') continue
+    total += thinking
+    reported++
+  }
+  return { thinking: total, exact: byRequest.size > 0 && reported === byRequest.size }
+}
+
+// Returns { speed: outputTokenCount } across all messages, one final usage per
+// request. Requests without a `speed` field are left out, so an empty object
+// means no request reported one.
+export function calculateOutputBySpeed(messages) {
+  const result = {}
+  for (const { usage } of finalUsageByRequest(messages).values()) {
+    if (!usage.speed) continue
+    result[usage.speed] = (result[usage.speed] || 0) + outputOf(usage)
+  }
+  return result
+}
+
 // Returns { modelId: outputTokenCount } across all messages, one final usage per
 // request. Covers both main and subagent messages since both carry message.model.
 export function calculateOutputByModel(messages) {

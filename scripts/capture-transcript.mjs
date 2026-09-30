@@ -27,6 +27,8 @@ import {
   calculateOutputByModel,
   calculateVisibleOutput,
   calculateDedupedOutput,
+  calculateThinkingOutput,
+  calculateOutputBySpeed,
 } from './lib/tokens.mjs'
 import { calculateContextWindow, calculateSubagentContext } from './lib/context.mjs'
 import {
@@ -391,7 +393,11 @@ async function handleStop(
   const tokens = calculateTokenUsage(combined)
   tokens.visibleOutput = calculateVisibleOutput(combined)
   tokens.dedupedOutput = calculateDedupedOutput(combined)
+  const { thinking, exact: thinkingExact } = calculateThinkingOutput(combined)
+  tokens.thinkingOutput = thinking
+  tokens.thinkingExact = thinkingExact
   const outputByModel = calculateOutputByModel(combined)
+  const outputBySpeed = calculateOutputBySpeed(combined)
   // Occupancy comes from the whole session file, not `combined`. `combined` is
   // this turn's flow, which is enough for the current reading but cannot see a
   // peak or a compaction from earlier in the session. Subagent occupancy comes
@@ -416,6 +422,7 @@ async function handleStop(
       escInterrupts: escCount,
       tokens,
       outputByModel,
+      outputBySpeed,
       contextWindow,
       subagentContext,
       subagents: subagentNames,
@@ -489,10 +496,13 @@ async function handleStop(
   // chars/4 estimate, so on a turn dominated by one big tool_use it can
   // overshoot the API-reported total. Showing it then would print parts that
   // exceed their own sum, so drop the breakdown rather than clamp it into a lie.
+  // When every request reported its thinking tokens, the split is exact and
+  // the estimate is not needed.
   const outTotal = tokens.dedupedOutput
-  const showBreakdown = outTotal > 0 && tokens.visibleOutput <= outTotal
+  const visible = tokens.thinkingExact ? outTotal - tokens.thinkingOutput : tokens.visibleOutput
+  const showBreakdown = outTotal > 0 && visible >= 0 && visible <= outTotal
   const outBreakdown = showBreakdown
-    ? ` (${tokens.visibleOutput.toLocaleString()} v / ${(outTotal - tokens.visibleOutput).toLocaleString()} r)`
+    ? ` (${visible.toLocaleString()} v / ${(outTotal - visible).toLocaleString()} r)`
     : ''
   const tokenSummary = `${tokens.totalInput.toLocaleString()} in${breakdown} | ${outTotal.toLocaleString()} out${outBreakdown}${modelBreakdown}`
 

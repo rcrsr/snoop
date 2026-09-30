@@ -89,6 +89,7 @@ function runHook(dir, transcript, hookEvent) {
     encoding: 'utf-8',
   })
   assert.equal(res.status, 0, res.stderr)
+  return res
 }
 
 function readCapture(dir) {
@@ -140,6 +141,26 @@ test('a bash-mode turn starts at <bash-input>, not <bash-stdout>', () => {
 test('prompts without promptId keep last-match turn start', () => {
   const records = [prompt('p1', 0, 'one'), prompt('p2', 1, 'two')]
   assert.equal(findLastUserPromptIndex(records), 1)
+})
+
+test('status line splits output by exact thinking tokens when every request reports them', () => {
+  const withThinking = (r, output, thinking) => {
+    r.message.usage = { ...r.message.usage, output_tokens: output, output_tokens_details: { thinking_tokens: thinking }, speed: 'standard' }
+    return r
+  }
+  const { dir, transcript } = setup([
+    prompt('p1', 0, 'go'),
+    withThinking(assistant('a1', 1, 'r1', toolUse('t1', 'Bash')), 400, 300),
+    toolResult('u1', 2, 't1'),
+    withThinking(assistant('a2', 3, 'r2', text('done')), 100, 20),
+  ])
+  const res = runHook(dir, transcript, 'Stop')
+  assert.match(JSON.parse(res.stdout).systemMessage, /500 out \(180 v \/ 320 r\)/)
+  const { meta, messages } = readCapture(dir)
+  assert.equal(meta.tokens.thinkingOutput, 320)
+  assert.equal(meta.tokens.thinkingExact, true)
+  assert.deepEqual(meta.outputBySpeed, { standard: 500 })
+  assert.equal(messages.find((m) => m.uuid === 'a1').message.usage.thinking, 300)
 })
 
 test('detects the interrupt marker in both content forms', () => {

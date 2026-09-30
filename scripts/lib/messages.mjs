@@ -1,3 +1,5 @@
+import { contextOccupancy } from "./context.mjs";
+
 /**
  * Message filtering, streamlining, and analysis
  */
@@ -205,10 +207,15 @@ export function streamlineMessage(msg) {
         cache1h: u.cache_creation?.ephemeral_1h_input_tokens || 0,
         // Context occupancy at this request: how full the window was, not what
         // the request billed. For a subagent row this is the subagent's own
-        // window. Derivable from the fields above, but stored so every log item
-        // carries its footprint without consumers re-learning the formula.
-        context: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0),
+        // window. Stored so every log item carries its footprint without
+        // consumers re-learning the formula, including the iterations rule.
+        context: contextOccupancy(u),
       };
+      // Exact thinking tokens (Claude Code 2.1.284+). Absent, not 0, when the
+      // row does not report it, so consumers can tell the two apart.
+      const thinking = u.output_tokens_details?.thinking_tokens;
+      if (typeof thinking === "number") result.message.usage.thinking = thinking;
+      if (u.speed) result.message.usage.speed = u.speed;
     }
   }
   // Capture toolUseResult for subagent token counts and name mapping
