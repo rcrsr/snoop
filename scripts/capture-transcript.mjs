@@ -13,6 +13,7 @@ import {
   findLastUserPromptIndex,
   hasToolUse,
   isConversationMessage,
+  isInterruptMarker,
   isFinalAssistantMessage,
   shouldSkipMessage,
   streamlineMessage,
@@ -130,6 +131,36 @@ async function loadSubagentMessages(transcripts, turnStart) {
   return allMessages
 }
 
+/**
+ * When snoop's previous Stop capture started, in ms, or null if this session
+ * has none. Subagent messages since then belong to this capture.
+ *
+ * Bounding subagents by this turn's first message lost everything that ran
+ * between turns. Workflow agents start after the Workflow call returns
+ * `async_launched`, so they outlive the turn that spawned them: 740 of 775 real
+ * workflow agent messages landed between turns and no capture held them. The
+ * same bound lost subagent work in ESC-interrupted segments, which never get a
+ * Stop of their own.
+ *
+ * Claude Code writes a `stop_hook_summary` after each Stop, naming every hook
+ * and its duration. Its timestamp minus snoop's duration is when that capture
+ * began. That capture read the subagent files after its settle poll, so the
+ * two can overlap by up to the hook's own runtime (p95 267 ms); an overlap
+ * duplicates a message, where a gap would lose one.
+ */
+function previousCaptureStart(messages, beforeIndex) {
+  for (let i = beforeIndex - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.type !== 'system' || msg.subtype !== 'stop_hook_summary' || !msg.timestamp) continue
+    const hook = msg.hookInfos?.find((h) => h.command?.includes('capture-transcript'))
+    if (!hook) continue
+    const end = new Date(msg.timestamp).getTime()
+    if (!Number.isFinite(end)) continue
+    return end - (hook.durationMs ?? 0)
+  }
+  return null
+}
+
 // A partial holds streamlined records, so the meta tag scan of its raw segment
 // travels alongside them in a record of this type, dropped when merged.
 const PARTIAL_META_TYPE = 'meta-scan'
@@ -194,26 +225,23 @@ async function readSettledTranscript(transcriptPath) {
 async function handleUserPromptSubmit(transcriptPath, partialFile) {
   const messages = await readJsonLines(transcriptPath)
 
-  // Find the last assistant message
-  let lastAssistant = null
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].type === 'assistant') {
-      lastAssistant = messages[i]
-      break
-    }
-  }
-
-  // Check if it has pending tool_use (ESC interrupted)
-  if (!lastAssistant || !hasToolUse(lastAssistant)) {
-    return
-  }
-
   // Find the user prompt that started this flow
   const startIndex = findLastUserPromptIndex(messages)
   if (startIndex < 0) return
 
+  // The flow was cut short by ESC when it ends on a pending tool_use, or when
+  // Claude Code wrote its interrupt marker. The marker is the only sign of an
+  // ESC during text or thinking, where no tool_use is pending: that was 8 of 27
+  // real interrupts, each lost with its segment before the marker was checked.
+  // An interrupted flow never gets a Stop, so nothing else would capture it.
+  const lastAssistant = messages.findLast((m) => m.type === 'assistant')
+  const segment = messages.slice(startIndex)
+  if (!hasToolUse(lastAssistant) && !segment.some(isInterruptMarker)) {
+    return
+  }
+
   // Extract the partial flow, scanning for meta tags before streamlining
-  const raw = messages.slice(startIndex).filter((m) => !shouldSkipMessage(m))
+  const raw = segment.filter((m) => !shouldSkipMessage(m))
   const partial = raw.map(streamlineMessage)
   const meta = scanForMetaTags(raw)
   if (meta) partial.push({ type: PARTIAL_META_TYPE, meta })
@@ -303,13 +331,16 @@ async function handleStop(
   const current = currentRaw.map(streamlineMessage)
   combined.push(...current)
 
-  // Load and append subagent messages (only from current turn)
+  // Load and append subagent messages written since the previous capture, which
+  // takes in agents that ran between turns. The first capture in a session has
+  // no previous one and falls back to this turn's first message.
   const turnStart = current[0]?.timestamp ? new Date(current[0].timestamp).getTime() : 0
+  const since = previousCaptureStart(messages, startIndex) ?? turnStart
   const subagentFiles = walkSubagentFiles(subagentsDirFor(transcriptPath))
-  const subagentRaw = (await loadSubagentMessages(subagentFiles.transcripts, turnStart)).filter(
+  const subagentRaw = (await loadSubagentMessages(subagentFiles.transcripts, since)).filter(
     ({ msg }) => {
-      if (!msg.timestamp || !turnStart) return true
-      return new Date(msg.timestamp).getTime() >= turnStart
+      if (!msg.timestamp || !since) return true
+      return new Date(msg.timestamp).getTime() >= since
     }
   )
   const subagentMessages = subagentRaw.map(({ agentId, msg }) => ({
@@ -347,7 +378,12 @@ async function handleStop(
   }
 
   // Calculate stats
-  const timing = calculateTiming(combined, hookTime)
+  // Main-chain records only: subagent messages can now predate the prompt, and
+  // time spent between turns is not part of this turn.
+  const timing = calculateTiming(
+    combined.filter((m) => !m.subagent),
+    hookTime
+  )
   const msgCount = combined.length
   const toolCount = countToolUses(combined)
   const uniqueTools = getUniqueTools(combined)
