@@ -24,7 +24,7 @@ node --test test/*.test.mjs
 | `scripts/lib/helpers.mjs` | File I/O, duration formatting |
 | `scripts/lib/messages.mjs` | Message filtering, streamlining, analysis |
 | `scripts/lib/tokens.mjs` | Token calculation from API-reported usage |
-| `scripts/lib/context.mjs` | Context window occupancy and window-size inference |
+| `scripts/lib/context.mjs` | Context window occupancy and per-model window sizes |
 | `scripts/lib/meta.mjs` | Meta tag scanning and parsing |
 | `hooks/hooks.json` | Binds `UserPromptSubmit`, `Stop`, and `StopFailure` events |
 | `agents/transcript-reviewer.md` | Post-mortem analysis agent (haiku model) |
@@ -68,7 +68,7 @@ Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `con
 - **Status line format**: modify token/subagent/tool summary in `handleStop()`
 - **Token calculation**: `lib/tokens.mjs` - all counts from API-reported usage. `finalUsageByRequest()` keeps one usage per `requestId`, the one with the largest `output_tokens`. A request's lines carry partial counts until the closing one, and line order is not reliably chronological, so never sort by timestamp and never sum per line.
 - **Context occupancy**: `lib/context.mjs`. Distinct from `lib/tokens.mjs`: totals sum every request and only grow, occupancy is one request's prompt size and drops on compaction, so a session can bill 4M tokens while occupying 90k. `calculateContextWindow()` reads the whole session file, not `combined`, since a turn's flow cannot show an earlier peak or compaction. Current occupancy is the last main-chain assistant message in file order, matching Claude Code's own extractor and the settle contract; `peak` is a maximum and needs no ordering, so neither path sorts by timestamp. Rows whose occupancy is 0 are skipped: an `isApiErrorMessage` row carries a present-but-empty usage object, and 47 of 706 real sessions would otherwise have recorded a 0% reading for a turn whose window may have been nearly full. Context appears in the meta record and per-message fields only, never the status line — a live statusline already shows context there; snoop's job is capturing it for later review.
-- **Window size inference**: not recoverable from `message.model` — a session running `opus[1m]` records plain `claude-opus-5`. Three signals, strongest first: occupancy above 200k (proof), `--model` in the `CLAUDE_PID` process argv, `settings.json` `model`. Only the first is proof, so `windowBasis` travels with the reading: consumers must treat `assumed` as an exact token count over a guessed 200k denominator. A `/model` switch mid-session is invisible to the latter two.
+- **Window size**: transcript only. `MODEL_WINDOWS` in `lib/context.mjs` maps family-version to the model's maximum input window from Anthropic's model table; add a row when a model ships. `windowBasis` is `model` (listed), `observed` (unlisted, a reading on that same model passed 200k), or `unknown` (size and percentages `null`). The window follows the reading row's model, never a session-wide peak, so a `/model` switch is handled. Never read argv or `settings.json`: `ANTHROPIC_MODEL` and `/model` override both without a trace.
 - **Message filtering**: `lib/messages.mjs` - `streamlineMessage()` controls captured fields
 - **Meta tag parsing**: `lib/meta.mjs` - `scanForMetaTags()` extracts tag attributes. Always pass raw records, never streamlined ones: streamlining truncates tool results to 500 chars. ESC partials store their scan in a `meta-scan` record that `handleStop` strips on merge
 - **Subagent loading**: `loadSubagentMessages()` in main script. `findSubagentFiles()` recurses, since Task agents sit in `subagents/` but Workflow agents sit in `subagents/workflows/wf_<runId>/`. Names come from `agent-<id>.meta.json` sidecars via `loadAgentTypes()`, falling back to `buildAgentNameMap()`.
@@ -90,8 +90,8 @@ JSONL with meta record first, then one message per line:
 | `escInterrupts` | number | ESC interrupt count |
 | `tokens` | object | Token usage breakdown. Output counts: `output` (legacy, undercounts subagents), `dedupedOutput` (main + subagent, deduped by `requestId`), `visibleOutput` (estimated readable text and tool calls, thinking excluded) |
 | `outputByModel` | object | Per-model output token counts, deduped by `requestId` (optional) |
-| `contextWindow` | object | Context occupancy at end of turn: `used`, `peak`, `size`, `windowBasis`, `usedPercentage`, `peakPercentage`, `model`, `compactThreshold`, `headroom`, `compactions` (optional; absent when no assistant usage exists yet) |
-| `subagentContext` | array | Per-subagent occupancy: `agentId`, `peak`, `models`, `name` (optional) |
+| `contextWindow` | object | Context occupancy at end of turn: `used`, `peak`, `size`, `windowBasis`, `usedPercentage`, `peakPercentage`, `model`, `peakModel`, `compactThreshold`, `headroom`, `compactions` (optional; absent when no assistant usage exists yet). `size`, the percentages, `compactThreshold`, and `headroom` are `null` when `windowBasis` is `unknown` |
+| `subagentContext` | array | Per-subagent occupancy: `agentId`, `peak`, `size`, `peakPercentage`, `models`, `name` (optional) |
 | `subagents` | array | Subagent type names (if any) |
 | `lastAssistantPreview` | string | Single-line preview of final assistant message, ≤200 chars (optional, Claude Code 2.1.101+). Absent means the turn produced no final assistant message, which is how failures are detected. Empty string means it produced a blank one |
 | `incompleteCapture` | boolean | Present and `true` only when the settle poll timed out. Token counts, `outputByModel`, and the preview are short |

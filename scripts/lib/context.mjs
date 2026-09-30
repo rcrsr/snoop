@@ -1,8 +1,3 @@
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
-import { execFileSync } from 'child_process'
-
 /**
  * Context window occupancy from API-reported usage
  *
@@ -17,10 +12,14 @@ import { execFileSync } from 'child_process'
  * questions and must not be confused. Totals sum every request ever made and
  * only grow; occupancy is a single request's prompt size, and it falls when the
  * conversation compacts. A session can bill 4M tokens while occupying 90k.
+ *
+ * Everything here comes from the session transcript. Process argv and
+ * settings.json were tried and dropped: ANTHROPIC_MODEL and a mid-session
+ * /model switch both override them, and neither leaves a trace in either place.
  */
 
 const WINDOW_1M = 1_000_000
-const WINDOW_DEFAULT = 200_000
+const WINDOW_200K = 200_000
 
 // Autocompact fires at window - min(maxOutputTokens, 20000) - 13000. Both
 // reserves are constants in Claude Code; the output reserve saturates at 20k for
@@ -28,6 +27,37 @@ const WINDOW_DEFAULT = 200_000
 // Sonnet 5 figure, so the reconstruction is confirmed against a documented value.
 const OUTPUT_RESERVE = 20_000
 const COMPACT_RESERVE = 13_000
+
+// Maximum input window per model, keyed by family-version, from Anthropic's
+// model table. `message.model` names the model exactly, so a listed model needs
+// no inference. An unlisted model resolves only from its own readings.
+const MODEL_WINDOWS = {
+  'fable-5-1': WINDOW_1M,
+  'fable-5': WINDOW_1M,
+  'mythos-5-1': WINDOW_1M,
+  'mythos-5': WINDOW_1M,
+  'opus-5-5': WINDOW_1M,
+  'opus-5': WINDOW_1M,
+  'opus-4-8': WINDOW_1M,
+  'opus-4-7': WINDOW_1M,
+  'opus-4-6': WINDOW_1M,
+  'sonnet-5-5': WINDOW_1M,
+  'sonnet-5': WINDOW_1M,
+  'sonnet-4-6': WINDOW_1M,
+  'haiku-4-5': WINDOW_200K,
+}
+
+/**
+ * Window size from a model ID, or null for a model not in the table. Tolerates
+ * a date suffix (`claude-haiku-4-5-20251001`) and a provider prefix
+ * (`us.anthropic.claude-opus-4-8`). The minor version is one or two digits, so
+ * a date directly after the major version is never read as a minor version.
+ */
+export function modelWindow(modelId) {
+  const m = typeof modelId === 'string' && modelId.match(/claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?!\d)/)
+  if (!m) return null
+  return MODEL_WINDOWS[m[3] ? `${m[1]}-${m[2]}-${m[3]}` : `${m[1]}-${m[2]}`] ?? null
+}
 
 /**
  * Prompt tokens occupying the window for one request. Accepts raw API field
@@ -47,68 +77,25 @@ const isMainAssistant = (msg) =>
   msg?.type === 'assistant' && !!msg.message?.usage && !msg.isSidechain && !msg.subagent
 
 /**
- * The window size is not recoverable from `message.model`: a session running
- * opus[1m] records plain `claude-opus-5`, verified on a session that reached
- * 989,865 tokens and on one launched with an explicit `--model opus[1m]`.
- * Three signals recover it, strongest first. Only the first is proof, so the
- * basis travels with the number and callers mark an assumed window rather than
- * publishing a confident percentage against a guessed denominator.
+ * The window a reading on `model` was measured against, and how it is known.
+ *
+ * - `model`: the model table lists it.
+ * - `observed`: unlisted, but a reading on this same model passed 200k, which
+ *   only a 1M window allows. Scoped to the model, so a peak from before a
+ *   /model switch never inflates the window of the model switched to.
+ * - `unknown`: unlisted and never past 200k. Size stays null rather than a
+ *   guessed denominator; the token counts are still exact.
  */
-function inferWindow(peak) {
-  if (peak > WINDOW_DEFAULT) return { size: WINDOW_1M, basis: 'observed' }
-
-  // A model named on the command line overrides the configured default, so the
-  // two must not be consulted together: `--model haiku` against a settings.json
-  // of `opus[1m]` is a 200k session, and reading both would call it 1M.
-  const launched = launchModel()
-  const declared = launched ?? configuredModel()
-
-  // These signals can only raise the window, never rule 1M out. A declared
-  // model without the suffix may still be natively 1M, so the absence of `[1m]`
-  // leaves the window assumed rather than proving 200k.
-  if (declared?.includes('[1m]')) {
-    return { size: WINDOW_1M, basis: launched ? 'argv' : 'settings' }
-  }
-  return { size: WINDOW_DEFAULT, basis: 'assumed' }
+function resolveWindow(model, modelPeak) {
+  const listed = modelWindow(model)
+  // A reading above the listed size means the table is wrong for this model.
+  if (listed && modelPeak <= listed) return { size: listed, basis: 'model' }
+  if (modelPeak > WINDOW_200K) return { size: WINDOW_1M, basis: 'observed' }
+  return { size: null, basis: 'unknown' }
 }
 
-/**
- * The model named in the running process's own argv. Claude Code exports its pid
- * as CLAUDE_PID, so the flags it launched with are readable from the process
- * table. Silent on any failure: ps is absent on some platforms, and the flag is
- * often not passed at all.
- */
-function launchModel() {
-  const pid = process.env.CLAUDE_PID
-  if (!pid || !/^\d+$/.test(pid)) return null
-  try {
-    const argv = execFileSync('ps', ['-o', 'args=', '-p', pid], {
-      encoding: 'utf-8',
-      timeout: 500,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    })
-    return argv.match(/--model[= ]+(\S+)/)?.[1] ?? null
-  } catch {
-    return null
-  }
-}
-
-/** Settings precedence, narrowest first. A `/model` switch mid-session is invisible here. */
-function configuredModel() {
-  const dir = process.env.CLAUDE_PROJECT_DIR || process.cwd()
-  const candidates = [
-    path.join(dir, '.claude', 'settings.local.json'),
-    path.join(dir, '.claude', 'settings.json'),
-    path.join(os.homedir(), '.claude', 'settings.json'),
-  ]
-  for (const file of candidates) {
-    try {
-      const model = JSON.parse(fs.readFileSync(file, 'utf-8')).model
-      if (typeof model === 'string' && model) return model
-    } catch {}
-  }
-  return null
-}
+const percentOf = (n, size) =>
+  size ? Math.min(100, Math.max(0, Math.round((n / size) * 100))) : null
 
 /**
  * Occupancy of the live conversation, plus its high-water mark.
@@ -122,7 +109,9 @@ function configuredModel() {
  *
  * `peak` is a maximum, so it needs no ordering at all. It survives compaction,
  * which is the point: a session that compacted at 99% reports a 22% current
- * occupancy, and only the peak shows how close it came to the limit.
+ * occupancy, and only the peak shows how close it came to the limit. It is
+ * measured against its own row's model, which differs from `model` after a
+ * /model switch, so `peakModel` names it.
  *
  * Rows that occupy nothing are skipped rather than taken as a zero reading. A
  * usage object can be present and empty on an error response, and a turn that
@@ -130,23 +119,29 @@ function configuredModel() {
  */
 export function calculateContextWindow(messages) {
   let used = 0
-  let peak = 0
   let model = null
+  let peak = 0
+  let peakModel = null
+  const peakByModel = new Map()
 
   for (const msg of messages) {
     if (!isMainAssistant(msg)) continue
     const occupancy = contextOccupancy(msg.message.usage)
     if (occupancy === 0) continue
     used = occupancy
-    peak = Math.max(peak, occupancy)
     model = msg.message.model ?? null
+    peakByModel.set(model, Math.max(peakByModel.get(model) ?? 0, occupancy))
+    if (occupancy > peak) {
+      peak = occupancy
+      peakModel = model
+    }
   }
 
   if (peak === 0) return null
 
-  const { size, basis } = inferWindow(peak)
-  const threshold = size - OUTPUT_RESERVE - COMPACT_RESERVE
-  const pct = (n) => Math.min(100, Math.max(0, Math.round((n / size) * 100)))
+  const { size, basis } = resolveWindow(model, peakByModel.get(model))
+  const peakSize = resolveWindow(peakModel, peakByModel.get(peakModel)).size
+  const threshold = size ? size - OUTPUT_RESERVE - COMPACT_RESERVE : null
 
   // Compaction discards context mid-session, so a bare occupancy reading
   // understates what the session actually held. Claude Code records the exact
@@ -167,11 +162,12 @@ export function calculateContextWindow(messages) {
     peak,
     size,
     windowBasis: basis,
-    usedPercentage: pct(used),
-    peakPercentage: pct(peak),
+    usedPercentage: percentOf(used, size),
+    peakPercentage: percentOf(peak, peakSize),
     model,
+    peakModel,
     compactThreshold: threshold,
-    headroom: Math.max(0, threshold - used),
+    headroom: threshold === null ? null : Math.max(0, threshold - used),
     compactions,
   }
 }
@@ -183,7 +179,8 @@ export function calculateContextWindow(messages) {
  * slices of the parent's. Each is a maximum over that agent's own requests:
  * subagent transcripts are appended per agent and a maximum needs no ordering.
  * Model comes from the agent's own messages, which is how a haiku subagent
- * spawned by an opus session is traced back.
+ * spawned by an opus session is traced back. `size` is the window of the model
+ * that produced the peak, resolved the same way as the main session's.
  */
 export function calculateSubagentContext(messages, nameFor = () => null) {
   const byAgent = new Map()
@@ -192,18 +189,37 @@ export function calculateSubagentContext(messages, nameFor = () => null) {
     const agentId = msg.subagent
     if (!agentId || msg.type !== 'assistant' || !msg.message?.usage) continue
 
-    const entry = byAgent.get(agentId) ?? { agentId, peak: 0, models: new Set() }
-    entry.peak = Math.max(entry.peak, contextOccupancy(msg.message.usage))
-    if (msg.message.model) entry.models.add(msg.message.model)
+    const entry = byAgent.get(agentId) ?? {
+      agentId,
+      peak: 0,
+      peakModel: null,
+      models: new Set(),
+      peakByModel: new Map(),
+    }
+    const occupancy = contextOccupancy(msg.message.usage)
+    const model = msg.message.model ?? null
+    if (model) entry.models.add(model)
+    entry.peakByModel.set(model, Math.max(entry.peakByModel.get(model) ?? 0, occupancy))
+    if (occupancy > entry.peak) {
+      entry.peak = occupancy
+      entry.peakModel = model
+    }
     byAgent.set(agentId, entry)
   }
 
   return Array.from(byAgent.values())
-    .map(({ agentId, peak, models }) => {
+    .map(({ agentId, peak, peakModel, models, peakByModel }) => {
+      const { size } = resolveWindow(peakModel, peakByModel.get(peakModel) ?? 0)
       // The agent type is what makes a reading traceable to the work behind it.
       const name = nameFor(agentId)
-      return { agentId, peak, models: Array.from(models).sort(), ...(name && { name }) }
+      return {
+        agentId,
+        peak,
+        size,
+        peakPercentage: percentOf(peak, size),
+        models: Array.from(models).sort(),
+        ...(name && { name }),
+      }
     })
     .sort((a, b) => b.peak - a.peak)
 }
-

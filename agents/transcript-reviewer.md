@@ -207,7 +207,7 @@ Issue: Redundant file read — same file read twice in one response.
 - Input tokens: {total}
 - Output tokens: {total}
 - Cache read: {total}
-- Context used: {contextWindow.usedPercentage}% ({contextWindow.used} / {contextWindow.size}) on {contextWindow.model}
+- Context used: {contextWindow.usedPercentage}% ({contextWindow.used} / {contextWindow.size}) on {contextWindow.model}. When `windowBasis` is `unknown`, report `{contextWindow.used}` tokens with no percentage
 - Context peak: {contextWindow.peakPercentage}%
 - Subagents: {count}
 - Tool calls: {count}

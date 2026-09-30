@@ -165,19 +165,19 @@ The meta record carries a `contextWindow` object and, when the turn spawned suba
 
 ```json
 "contextWindow": {
-  "used": 150010, "peak": 989865, "size": 1000000, "windowBasis": "observed",
-  "usedPercentage": 15, "peakPercentage": 99, "model": "claude-opus-5",
+  "used": 150010, "peak": 989865, "size": 1000000, "windowBasis": "model",
+  "usedPercentage": 15, "peakPercentage": 99, "model": "claude-opus-5", "peakModel": "claude-opus-5",
   "compactThreshold": 967000, "headroom": 816990,
   "compactions": [{ "trigger": "auto", "preTokens": 998938, "postTokens": 32774, "droppedTokens": 966164 }]
 },
 "subagentContext": [
-  { "agentId": "agent-bbb2", "peak": 367005, "models": ["claude-sonnet-5"], "name": "Explore" }
+  { "agentId": "agent-bbb2", "peak": 367005, "size": 1000000, "peakPercentage": 37, "models": ["claude-sonnet-5"], "name": "Explore" }
 ]
 ```
 
 Occupancy answers a different question from the token totals. `tokens.totalInput` is everything the session ever billed and only grows; `contextWindow.used` is how much of the window the conversation occupies at the end of the turn, and it *drops* when the session compacts. A long session can bill millions of tokens while occupying 90k. `peak` is the high-water mark, the only way to see how close a compacted session came to its limit, and each `compactions` entry records what one compaction discarded.
 
-The count is exact — the same `input + cacheCreate + cacheRead` sum over the same message that Claude Code uses for its own context readout. The window size is the soft part, because a session running `opus[1m]` records itself as plain `claude-opus-5`. Snoop resolves it from occupancy above 200k (proof — nothing else reaches it), then a `--model` flag on the running process, then the `model` in `settings.json`; `windowBasis` says which signal won (`observed`, `argv`, `settings`), or `assumed` when none did — then the tokens are still exact, only the 200k denominator is a guess.
+The count is exact — the same `input + cacheCreate + cacheRead` sum over the same message that Claude Code uses for its own context readout. The window size comes from the transcript too: `message.model` names the model, and snoop looks up that model's maximum input window (`windowBasis: "model"`). A model snoop does not list yet resolves to 1M once one of its own readings passes 200k (`observed`); until then `size` and the percentages are `null` (`unknown`) while the token counts stay exact. The window follows the model of the row being measured, so a `/model` switch mid-session is handled, and `peakModel` names the model the peak was measured on.
 
 Because subagents run their own windows, `subagentContext` readings are separate measurements rather than slices of the parent's — which is what makes a 367k Explore agent inside a 150k session traceable to the agent type and model that produced it.
 
