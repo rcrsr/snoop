@@ -26,7 +26,7 @@ node --test test/*.test.mjs
 | `scripts/lib/tokens.mjs` | Token calculation from API-reported usage |
 | `scripts/lib/context.mjs` | Context window occupancy and per-model window sizes |
 | `scripts/lib/meta.mjs` | Meta tag scanning and parsing |
-| `hooks/hooks.json` | Binds `UserPromptSubmit`, `Stop`, and `StopFailure` events |
+| `hooks/hooks.json` | Binds `UserPromptSubmit`, `Stop`, `StopFailure`, and `SessionEnd` events |
 | `agents/transcript-reviewer.md` | Post-mortem analysis agent (haiku model) |
 | `skills/review/SKILL.md` | `/snoop:review` entry point (Claude Code 2.1.3+) |
 
@@ -37,6 +37,7 @@ node --test test/*.test.mjs
 | `UserPromptSubmit` | Detect ESC interrupt (pending `tool_use` or `[Request interrupted by user` marker), save partial transcript |
 | `Stop` | Wait for final assistant message, merge partials, write meta record + messages, update `latest` pointer, prune to 10 files |
 | `StopFailure` | Same pipeline as `Stop` minus the wait; fires instead of `Stop` on API errors (rate limit, 5xx, auth). Captured transcript never has `lastAssistantPreview`. Turns that fail before any assistant output also show `0` output tokens and `0` tools; turns that fail after tool calls retain both. |
+| `SessionEnd` | Flush subagent messages written since the last snoop capture started (`previousCaptureStart()` over the whole file). Writes nothing when none exist, or when the session has no earlier capture to bound from. No partial merge, no preview; `timing` spans the agent messages. The meta record carries `trailingCapture: true`. A resumed session's next `Stop` re-captures the same messages, since SessionEnd leaves no `stop_hook_summary` behind |
 
 `Stop` fires before Claude Code flushes the turn's final assistant message to the session file. `readSettledTranscript()` polls for up to 1000 ms (50 ms interval) until the last conversation record is an assistant message with no pending `tool_use`, then returns whatever it has plus a `settled` flag. Without this the final API call's tokens, model, and text are lost. A line holding only a `tool_use` is mid-turn even though it is an assistant record, so `isFinalAssistantMessage()` rejects it. On timeout the meta record gets `incompleteCapture: true`.
 
@@ -62,7 +63,7 @@ Place `.claude/snoop-context.json` in the project root to set default meta value
 ```
 
 Merge order: context file values < snoop meta tag values.
-Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `outputBySpeed`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `workflows`, `lastAssistantPreview`, `incompleteCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `outputBySpeed`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `workflows`, `lastAssistantPreview`, `incompleteCapture`, `trailingCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## When Editing
 
@@ -100,6 +101,7 @@ JSONL with meta record first, then one message per line:
 | `subagents` | array | Subagent type names (if any) |
 | `lastAssistantPreview` | string | Single-line preview of final assistant message, ≤200 chars (optional, Claude Code 2.1.101+). Absent means the turn produced no final assistant message, which is how failures are detected. Empty string means it produced a blank one |
 | `incompleteCapture` | boolean | Present and `true` only when the settle poll timed out. Token counts, `outputByModel`, and the preview are short |
+| `trailingCapture` | boolean | Present and `true` only on a `SessionEnd` capture of subagent work after the last `Stop` |
 | `description` | string | From meta tag or context file (optional) |
 | `tags` | array | From meta tag or context file (optional) |
 | `*` | any | Dynamic attributes from meta tag or context file |

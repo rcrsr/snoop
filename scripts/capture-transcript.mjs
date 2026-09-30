@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Dual-purpose hook for capturing run transcripts.
+ * Hook for capturing run transcripts.
  * - UserPromptSubmit: Detects ESC interrupts, saves partial transcripts
- * - Stop: Merges partials, captures complete transcript with meta record
+ * - Stop / StopFailure: Merges partials, captures complete transcript with meta record
+ * - SessionEnd: Captures subagent work written after the last Stop, if any
  */
 
 import * as fs from 'fs'
@@ -326,10 +327,15 @@ async function handleStop(
   // StopFailure fires when the API call errored, so no final assistant message
   // is coming. Read once rather than waiting out the timeout.
   const isFailure = hookEvent === 'StopFailure'
-  const { messages, settled } = isFailure
-    ? { messages: await readJsonLines(transcriptPath), settled: false }
-    : await readSettledTranscript(transcriptPath)
-  const startIndex = findLastUserPromptIndex(messages)
+  // SessionEnd flushes subagent work written after the last Stop, typically a
+  // workflow still running as the user closed the session: 7.1% of subagent
+  // output tokens across 44 sessions fell there. It has no turn of its own.
+  const isSessionEnd = hookEvent === 'SessionEnd'
+  const { messages, settled } =
+    isFailure || isSessionEnd
+      ? { messages: await readJsonLines(transcriptPath), settled: !isFailure }
+      : await readSettledTranscript(transcriptPath)
+  const startIndex = isSessionEnd ? messages.length : findLastUserPromptIndex(messages)
 
   if (startIndex < 0) {
     return { decision: 'approve', systemMessage: '' }
@@ -345,7 +351,7 @@ async function handleStop(
   // throwing and stranding the file, which would fail every later Stop too.
   let combined = []
   let partialMeta = null
-  if (fs.existsSync(partialFile)) {
+  if (!isSessionEnd && fs.existsSync(partialFile)) {
     for (const record of await readJsonLines(partialFile)) {
       if (record.type === PARTIAL_META_TYPE) partialMeta = record.meta
       else combined.push(record)
@@ -362,7 +368,11 @@ async function handleStop(
   // takes in agents that ran between turns. The first capture in a session has
   // no previous one and falls back to this turn's first message.
   const turnStart = current[0]?.timestamp ? new Date(current[0].timestamp).getTime() : 0
-  const since = previousCaptureStart(messages, startIndex) ?? turnStart
+  const previousStart = previousCaptureStart(messages, startIndex)
+  // With no earlier capture there is no bound, and 0 would take every agent the
+  // session ever ran.
+  if (isSessionEnd && previousStart === null) return { decision: 'approve', systemMessage: '' }
+  const since = previousStart ?? turnStart
   const subagentFiles = walkSubagentFiles(subagentsDirFor(transcriptPath))
   const subagentRaw = (await loadSubagentMessages(subagentFiles.transcripts, since)).filter(
     ({ msg }) => {
@@ -375,6 +385,7 @@ async function handleStop(
     subagent: agentId,
   }))
   combined.push(...subagentMessages)
+  if (isSessionEnd && subagentMessages.length === 0) return { decision: 'approve', systemMessage: '' }
 
   // Scan raw records for meta tags, since streamlining truncates tool results.
   // Order matches combined: partial, then current, then subagents; last wins.
@@ -407,10 +418,14 @@ async function handleStop(
   // Calculate stats
   // Main-chain records only: subagent messages can now predate the prompt, and
   // time spent between turns is not part of this turn.
-  const timing = calculateTiming(
-    combined.filter((m) => !m.subagent),
-    hookTime
-  )
+  // A trailing capture has no main-chain records, so it spans the agent work,
+  // not the gap until the user closed the session.
+  const timing = isSessionEnd
+    ? calculateTiming(combined)
+    : calculateTiming(
+        combined.filter((m) => !m.subagent),
+        hookTime
+      )
   const msgCount = combined.length
   const toolCount = countToolUses(combined)
   const uniqueTools = getUniqueTools(combined)
@@ -474,10 +489,12 @@ async function handleStop(
       // A failed turn produced no final assistant message. Whatever Claude Code
       // hands the hook on StopFailure, the field stays absent: consumers key
       // failure detection on that absence.
-      lastAssistantPreview: isFailure ? null : buildLastAssistantPreview(lastAssistantMessage),
+      // A trailing capture has no assistant turn of its own either.
+      lastAssistantPreview: isFailure || isSessionEnd ? null : buildLastAssistantPreview(lastAssistantMessage),
       // The final assistant message never landed. Token counts, outputByModel,
       // and the preview are short. Say so rather than reporting them as whole.
       incompleteCapture: !settled && !isFailure,
+      trailingCapture: isSessionEnd,
     },
     metaInfo,
     snoopContext

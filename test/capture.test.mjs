@@ -276,3 +276,46 @@ test('subagentContext carries sidecar details and meta names workflow runs', () 
   assert.equal(byId['agent-f1'].durationMs, 4200)
   assert.equal(byId['agent-f1'].description, 'ADR check')
 })
+
+test('SessionEnd captures subagent work written after the last Stop', () => {
+  const { dir, transcript } = setup([
+    prompt('p1', 0, 'run the workflow'),
+    assistant('a1', 1, 'r1', toolUse('t1', 'Workflow')),
+    { ...toolResult('u1', 2, 't1'), toolUseResult: { runId: 'wf_tail', workflowName: 'tail', status: 'async_launched' } },
+    assistant('a2', 3, 'r2', text('launched')),
+    stopSummary(5),
+  ])
+  const agentDir = path.join(dir, 'session', 'subagents', 'workflows', 'wf_tail')
+  writeJsonl(path.join(agentDir, 'agent-t1.jsonl'), [
+    assistant('s0', 1, 'rs0', text('before the stop'), { isSidechain: true }),
+    assistant('s1', 20, 'rs1', text('after the stop'), { isSidechain: true }),
+    assistant('s2', 40, 'rs2', text('still going'), { isSidechain: true }),
+  ])
+
+  runHook(dir, transcript, 'SessionEnd')
+  const { meta, messages } = readCapture(dir)
+  assert.equal(meta.trailingCapture, true)
+  assert.deepEqual(messages.map((m) => m.uuid), ['s1', 's2'])
+  assert.deepEqual(meta.workflows, [{ runId: 'wf_tail', workflowName: 'tail' }])
+  assert.equal(meta.timing.start, ts(20))
+  assert.equal(meta.timing.end, ts(40))
+  assert.equal(meta.lastAssistantPreview, undefined)
+})
+
+test('SessionEnd writes nothing without trailing subagent work', () => {
+  const outDir = (dir) => path.join(dir, '.claude', 'transcripts')
+  const idle = setup([prompt('p1', 0, 'hi'), assistant('a1', 1, 'r1', text('done')), stopSummary(5)])
+  writeJsonl(path.join(idle.dir, 'session', 'subagents', 'agent-old.jsonl'), [
+    assistant('s1', 1, 'rs1', text('inside the turn'), { isSidechain: true }),
+  ])
+  runHook(idle.dir, idle.transcript, 'SessionEnd')
+  assert.ok(!fs.existsSync(path.join(outDir(idle.dir), 'latest')))
+
+  // No earlier capture means no bound; taking every agent would be wrong.
+  const fresh = setup([prompt('p1', 0, 'hi')])
+  writeJsonl(path.join(fresh.dir, 'session', 'subagents', 'agent-a.jsonl'), [
+    assistant('s1', 10, 'rs1', text('work'), { isSidechain: true }),
+  ])
+  runHook(fresh.dir, fresh.transcript, 'SessionEnd')
+  assert.ok(!fs.existsSync(path.join(outDir(fresh.dir), 'latest')))
+})

@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **SessionEnd flush:** a `SessionEnd` hook captures subagent work written after the session's last `Stop`, which no capture held before: 7.1% of subagent output tokens across 44 sessions. The transcript carries `trailingCapture: true`; sessions with no trailing work write nothing (#10).
 - **Agent metadata:** each `subagentContext` entry now carries `description`, `spawnDepth`, `isFork`, and `durationMs`, and a `workflows` array names each workflow run the capture touched by `runId` and `workflowName`. The `transcript-reviewer` report lists agents by description so parallel agents of one type stay distinguishable (#12).
 - **Exact thinking tokens:** `tokens.thinkingOutput` and `tokens.thinkingExact` in the meta record, and `thinking` on each captured message's `usage`, from Claude Code 2.1.284+'s `output_tokens_details.thinking_tokens`. When every request in the turn reports it, the status line's `v / r` split is exact rather than a 4-chars/token estimate, which misplaced 3,406 of 9,187 output tokens on one real turn (#11). ([#20](https://github.com/rcrsr/snoop/pull/20))
 - **Output by speed:** `outputBySpeed` in the meta record, and `speed` on each captured message's `usage`, so fast-mode output is visible (#14). ([#20](https://github.com/rcrsr/snoop/pull/20))

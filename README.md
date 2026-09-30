@@ -18,13 +18,14 @@ Captures, processes, and summarizes Claude Code run transcripts for debugging an
 
 ## How it works
 
-Snoop uses three Claude Code hooks:
+Snoop uses four Claude Code hooks:
 
 | Hook | Trigger | Action |
 |------|---------|--------|
 | `UserPromptSubmit` | User sends a message | Check for an ESC interrupt: a pending `tool_use` without `tool_result`, or Claude Code's `[Request interrupted by user]` marker. Save partial transcript with interrupt marker. |
 | `Stop` | Turn ends normally | Wait for the turn's final assistant message to reach the session file, merge any partial transcripts, write final JSONL, update `latest` pointer, prune old files. |
 | `StopFailure` | Turn ends in an API error (rate limit, 5xx, auth) | Same pipeline as `Stop`, minus the wait. Resulting transcript never has `lastAssistantPreview`, which is how `/snoop:review` identifies a failed turn. Turns that fail before any assistant output also show `0` output tokens and `0` tool calls; turns that fail after tool calls retain both. |
+| `SessionEnd` | Session closes | Capture subagent work written after the last `Stop`, typically a workflow still running as you close the session. Writes nothing when there is none. The transcript carries `trailingCapture: true`. |
 
 **Final message capture:** Claude Code fires `Stop` before it flushes the turn's last assistant message to disk. Snoop polls for up to 1000 ms until the last conversation record is an assistant message, then captures. Without the wait, every transcript would lose its final API call: output tokens, model, and text.
 
@@ -150,7 +151,7 @@ Place `.claude/snoop-context.json` in your project to set default meta values fo
 }
 ```
 
-Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `outputBySpeed`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `workflows`, `lastAssistantPreview`, `incompleteCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `outputBySpeed`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `workflows`, `lastAssistantPreview`, `incompleteCapture`, `trailingCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## Output Token Fields
 

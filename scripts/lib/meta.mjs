@@ -215,6 +215,7 @@ const BUILTIN_KEYS = new Set([
   'workflows',
   'lastAssistantPreview',
   'incompleteCapture',
+  'trailingCapture',
 ])
 
 // All reserved keys: special + built-in
@@ -277,6 +278,10 @@ export function buildMetaRecord(stats, metaInfo, context = {}) {
 
   if (stats.incompleteCapture) {
     record.incompleteCapture = true
+  }
+
+  if (stats.trailingCapture) {
+    record.trailingCapture = true
   }
 
   // Layer 1: context file values (excluding reserved attrs handled below)
