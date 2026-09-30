@@ -13,7 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- `test/meta.test.mjs`, run with `node --test test/*.test.mjs`.
+- `contextWindow` in the meta record: `used`, `peak`, `size`, `windowBasis`, `usedPercentage`, `peakPercentage`, `model`, `peakModel`, `compactThreshold`, `headroom`, `compactions`. Occupancy is exact, taken from the same `input + cacheCreate + cacheRead` sum over the same final message that Claude Code's own context readout uses, and answers a different question from the token totals: totals sum every request and only grow, occupancy is one request's prompt size and drops on compaction, so a session can bill 4M tokens while occupying 90k. `peak` is the high-water mark — the only way to see how close a compacted session came to its limit — and each `compactions` entry records its trigger and the tokens that one compaction dropped. Meta record and transcript only, never the status line: a live statusline already shows context there; snoop's job is capturing it for later review.
+- `subagentContext` in the meta record: `agentId`, `peak`, `size`, `peakPercentage`, `models`, `name` per subagent the turn spawned. A subagent runs its own window, so these are separate readings, not slices of the parent's — which is how a 367k Explore agent inside a 150k session is traced back to the agent type and model that produced it.
+- `context` on every captured message's `usage`: window occupancy at that request, so the transcript carries a context footprint per log item and the growth curve is readable straight off the file. On a subagent row it reads against that agent's own window. Zero on API-error rows.
+- Window size from the transcript alone. `message.model` names the model exactly, and a table of each model's maximum input window (1M for Fable, Mythos, Opus 4.6+, Sonnet 4.6+; 200k for Haiku 4.5) sets `size` with `windowBasis: "model"`. An unlisted model resolves to 1M as `observed` once one of its own readings passes 200k, else `size` and the percentages are `null` with `windowBasis: "unknown"`; the token counts stay exact. The window follows the model on the reading row, so a `/model` switch mid-session measures against the new model, and `peakModel` names the model the peak was measured on. Process argv and `settings.json` are never read: `ANTHROPIC_MODEL` and `/model` both override them without a trace. Adapted from #6 by @tedserbinski.
+- `transcript-reviewer` gains a "Context Pressure" issue category (peak near the limit, compactions explaining lost history), context metrics in its report, and a growth-curve survey command over the per-message footprint.
+- `test/meta.test.mjs` and `test/context.test.mjs`, run with `node --test test/*.test.mjs`.
 
 ## [1.7.1] - 2026-07-08
 
