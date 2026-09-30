@@ -107,7 +107,7 @@ test('an isMeta string after the prompt does not start the turn', () => {
     prompt('p1', 0, 'file it'),
     assistant('a1', 1, 'r1', toolUse('t1', 'Skill')),
     toolResult('u1', 2, 't1'),
-    { ...prompt('m1', 3, '(Re-invocation of /conduct:open-issue ...)'), isMeta: true },
+    { ...prompt('m1', 3, '(Re-invocation of /example:skill ...)'), isMeta: true },
   ]
   assert.equal(findLastUserPromptIndex(records), 0)
 
@@ -116,6 +116,30 @@ test('an isMeta string after the prompt does not start the turn', () => {
   const { meta, messages } = readCapture(dir)
   assert.equal(messages[0].uuid, 'p1')
   assert.deepEqual(meta.tools, ['Skill'])
+})
+
+test('a bash-mode turn starts at <bash-input>, not <bash-stdout>', () => {
+  const withId = (r, promptId) => ({ ...r, promptId })
+  const records = [
+    withId(prompt('p0', 0, 'earlier'), 'id0'),
+    assistant('a0', 1, 'r0', text('ok')),
+    withId(prompt('b1', 2, '<bash-input>ls</bash-input>'), 'id1'),
+    withId(prompt('b2', 3, '<bash-stdout>a.txt</bash-stdout><bash-stderr></bash-stderr>'), 'id1'),
+  ]
+  assert.equal(findLastUserPromptIndex(records), 2)
+
+  const { dir, transcript } = setup([...records, assistant('a1', 4, 'r1', text('done'))])
+  runHook(dir, transcript, 'Stop')
+  const { messages } = readCapture(dir)
+  assert.deepEqual(
+    messages.map((m) => m.uuid),
+    ['b1', 'b2', 'a1']
+  )
+})
+
+test('prompts without promptId keep last-match turn start', () => {
+  const records = [prompt('p1', 0, 'one'), prompt('p2', 1, 'two')]
+  assert.equal(findLastUserPromptIndex(records), 1)
 })
 
 test('detects the interrupt marker in both content forms', () => {

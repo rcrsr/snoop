@@ -124,6 +124,8 @@ Add `<snoop:meta key="value" .../>` anywhere in conversation to enrich the trans
 
 All other attributes pass through as raw strings. Built-in record keys (`type`, `transcriptId`, `timing`, `tokens`, etc.) cannot be overwritten.
 
+Tags count anywhere in prompts and assistant text. In tool output, a tag counts only when its line holds the tag alone or as a JSON string value (`"metatag": "<snoop:meta .../>"`), outside a ``` fence, and not from `Read`, `Grep`, `Glob`, `NotebookRead`, or `WebFetch`. A CLI that prints the tag registers the transcript; a `grep` or `cat` of docs showing an example does not.
+
 When multiple meta tags appear, the last one wins (no merging). Custom paths skip `latest` pointer and pruning.
 
 **Example:**
