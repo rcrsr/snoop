@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 
 import {
   calculateDedupedOutput,
+  calculateOutputByModel,
   calculateOutputBySpeed,
   calculateThinkingOutput,
+  calculateVisibleOutput,
 } from '../scripts/lib/tokens.mjs'
 import { contextOccupancy } from '../scripts/lib/context.mjs'
 import { streamlineMessage } from '../scripts/lib/messages.mjs'
@@ -85,4 +87,32 @@ test('occupancy uses the last iteration when a request made several', () => {
   const streamlined = streamlineMessage({ ...row('r1', multi), uuid: 'u1' })
   assert.equal(streamlined.message.usage.context, 210)
   assert.equal(streamlined.message.usage.input, 15) // billing keeps the aggregate
+})
+
+test('the closing line wins regardless of line order or timestamps', () => {
+  const partial = { ...row('r1', usage(1)), timestamp: '2026-09-29T10:00:05.000Z' }
+  const closing = { ...row('r1', usage(276)), timestamp: '2026-09-29T10:00:01.000Z' }
+  assert.equal(calculateDedupedOutput([partial, closing, partial]), 276)
+  assert.equal(calculateDedupedOutput([closing, partial]), 276)
+})
+
+test('output by model dedupes per request and covers subagents', () => {
+  const rows = [
+    row('r1', usage(1)),
+    row('r1', usage(100)),
+    { ...row('r2', usage(40), { subagent: 'agent-a' }), message: { ...row('r2', usage(40)).message, model: 'claude-haiku-4-5' } },
+    { type: 'assistant', message: { role: 'assistant', content: [], usage: usage(7) } },
+  ]
+  assert.deepEqual(calculateOutputByModel(rows), { 'claude-opus-5-5': 100, 'claude-haiku-4-5': 40 })
+})
+
+test('visible output counts text and tool calls, skips thinking and repeated uuids', () => {
+  const line = (uuid, block) => ({ type: 'assistant', uuid, requestId: 'r1', message: { role: 'assistant', content: [block] } })
+  const rows = [
+    line('u1', { type: 'thinking', thinking: 'z'.repeat(4000) }),
+    line('u2', { type: 'text', text: 'x'.repeat(40) }), // 10 tokens
+    line('u2', { type: 'text', text: 'x'.repeat(40) }), // same uuid, dropped
+    line('u3', { type: 'tool_use', name: 'Bash', input: { command: 'ls' } }), // 4 + 16 chars
+  ]
+  assert.equal(calculateVisibleOutput(rows), 15)
 })

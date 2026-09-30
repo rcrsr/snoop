@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
@@ -318,4 +318,71 @@ test('SessionEnd writes nothing without trailing subagent work', () => {
   ])
   runHook(fresh.dir, fresh.transcript, 'SessionEnd')
   assert.ok(!fs.existsSync(path.join(outDir(fresh.dir), 'latest')))
+})
+
+// Runs the hook without blocking, so the test can write to the session file
+// while the settle poll waits.
+function runHookAsync(dir, transcript, hookEvent) {
+  const child = spawn('node', [SCRIPT], { env: { ...process.env, CLAUDE_PROJECT_DIR: dir } })
+  let stdout = ''
+  child.stdout.on('data', (d) => (stdout += d))
+  child.stdin.end(
+    JSON.stringify({ transcript_path: transcript, session_id: 's1', hook_event_name: hookEvent, last_assistant_message: 'done' })
+  )
+  return new Promise((resolve) => child.on('close', (status) => resolve({ status, stdout })))
+}
+
+test('Stop waits for the final assistant message to land', async () => {
+  // Stop fires while the turn's last line is still a pending tool_use.
+  const { dir, transcript } = setup([prompt('p1', 0, 'go'), assistant('a1', 1, 'r1', toolUse('t1', 'Bash'))])
+  const started = Date.now()
+  const pending = runHookAsync(dir, transcript, 'Stop')
+  await new Promise((r) => setTimeout(r, 200))
+  fs.appendFileSync(
+    transcript,
+    [toolResult('u1', 2, 't1'), assistant('a2', 3, 'r2', text('done'))].map((r) => JSON.stringify(r)).join('\n') + '\n'
+  )
+  const { status, stdout } = await pending
+  assert.equal(status, 0)
+  assert.ok(Date.now() - started < 1000, 'settled capture waited out the full timeout')
+  assert.doesNotMatch(JSON.parse(stdout).systemMessage, /incomplete/)
+  const { meta, messages } = readCapture(dir)
+  assert.equal(meta.incompleteCapture, undefined)
+  assert.equal(messages.at(-1).uuid, 'a2')
+})
+
+test('Stop marks the capture incomplete when the final message never lands', async () => {
+  const { dir, transcript } = setup([prompt('p1', 0, 'go'), assistant('a1', 1, 'r1', toolUse('t1', 'Bash'))])
+  const started = Date.now()
+  const { stdout } = await runHookAsync(dir, transcript, 'Stop')
+  assert.ok(Date.now() - started >= 1000, 'gave up before the 1000 ms deadline')
+  assert.match(JSON.parse(stdout).systemMessage, /⚠️ incomplete/)
+  assert.equal(readCapture(dir).meta.incompleteCapture, true)
+})
+
+test('StopFailure captures at once, without a preview or an incomplete flag', async () => {
+  // The API call failed after a tool call: no final assistant message is coming.
+  const { dir, transcript } = setup([
+    prompt('p1', 0, 'go'),
+    assistant('a1', 1, 'r1', toolUse('t1', 'Bash')),
+    toolResult('u1', 2, 't1'),
+  ])
+  const started = Date.now()
+  const { stdout } = await runHookAsync(dir, transcript, 'StopFailure')
+  assert.ok(Date.now() - started < 1000, 'StopFailure waited on the settle poll')
+  assert.doesNotMatch(JSON.parse(stdout).systemMessage, /incomplete/)
+  const { meta } = readCapture(dir)
+  assert.equal(meta.lastAssistantPreview, undefined)
+  assert.equal(meta.incompleteCapture, undefined)
+  assert.deepEqual(meta.tools, ['Bash'])
+  assert.equal(meta.tokens.dedupedOutput, 5)
+})
+
+test('StopFailure before any assistant output reports zero output and tools', async () => {
+  const { dir, transcript } = setup([prompt('p1', 0, 'go')])
+  await runHookAsync(dir, transcript, 'StopFailure')
+  const { meta } = readCapture(dir)
+  assert.equal(meta.tokens.dedupedOutput, 0)
+  assert.equal(meta.toolCount, 0)
+  assert.equal(meta.lastAssistantPreview, undefined)
 })
