@@ -57,6 +57,14 @@ function extractTextContent(msg) {
         // Unescape JSON strings so meta tags with escaped quotes can be matched
         texts.push(unescapeJsonString(block.content))
       }
+      if (block.type === 'tool_result' && Array.isArray(block.content)) {
+        // Array-form results carry their text as [{ type: 'text', text }] blocks
+        for (const inner of block.content) {
+          if (inner?.type === 'text' && typeof inner.text === 'string') {
+            texts.push(unescapeJsonString(inner.text))
+          }
+        }
+      }
     }
   }
 
@@ -66,6 +74,9 @@ function extractTextContent(msg) {
 /**
  * Scan all message content for snoop:meta tags
  * Returns the last occurrence (last wins)
+ *
+ * Pass raw session records, never streamlined ones. streamlineMessage truncates
+ * tool results to 500 chars, which drops any tag that ends past that offset.
  * @returns {null | { file?: string, description?: string, tags?: string, [key: string]: string }}
  */
 export function scanForMetaTags(messages) {
