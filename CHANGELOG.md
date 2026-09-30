@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Reviewer model:** `transcript-reviewer` runs on `sonnet` (Claude Sonnet 5.5) instead of `haiku`, since root-cause analysis of a turn is judgment work. It runs at `effort: medium`, the level the Claude Sonnet 5.5 guidance recommends starting agentic multistep tool use at.
+- **Reviewer model:** `transcript-reviewer` runs on `sonnet` (Claude Sonnet 5.5) instead of `haiku`, since root-cause analysis of a turn is judgment work. It runs at `effort: medium`, the level the Claude Sonnet 5.5 guidance recommends starting agentic multistep tool use at. The `/snoop:review` skill uses the same model and effort.
 
 ### Added
 

@@ -28,7 +28,7 @@ node --test test/*.test.mjs
 | `scripts/lib/meta.mjs` | Meta tag scanning and parsing |
 | `hooks/hooks.json` | Binds `UserPromptSubmit`, `Stop`, `StopFailure`, and `SessionEnd` events |
 | `agents/transcript-reviewer.md` | Post-mortem analysis agent (sonnet model, medium effort) |
-| `skills/review/SKILL.md` | `/snoop:review` entry point (Claude Code 2.1.3+) |
+| `skills/review/SKILL.md` | `/snoop:review` entry point (Claude Code 2.1.3+; sonnet model, medium effort) |
 
 ## Hook Behavior
 
