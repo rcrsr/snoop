@@ -62,7 +62,7 @@ Place `.claude/snoop-context.json` in the project root to set default meta value
 ```
 
 Merge order: context file values < snoop meta tag values.
-Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`, `incompleteCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## When Editing
 
@@ -108,10 +108,12 @@ JSONL with meta record first, then one message per line:
 | `type` | string | `user`, `assistant`, or `interrupt` |
 | `timestamp` | ISO string | Message timestamp |
 | `uuid` | string | Message UUID |
+| `parentUuid` | string | Parent message UUID |
 | `requestId` | string | API request ID (for deduping streaming chunks) |
 | `subagent` | string | Agent ID if from Task tool subagent |
+| `toolUseResult` | object | `agentId` and `usage` on Task tool results; feeds `tokens.output` and name mapping |
 | `message.model` | string | Model ID for this message (e.g. `claude-sonnet-4-6`). Varies per message when subagents use different models. |
 | `message.content` | array | Blocks: `tool_use`, `tool_result`, `text`, `thinking` |
 | `message.usage` | object | `input`, `output`, `cacheRead`, `cacheCreate`, `cache5m`, `cache1h` token counts, plus `context`: window occupancy at this request (`input + cacheCreate + cacheRead`). On a subagent row it is that agent's own window. Zero on API-error rows |
 
-Tool result text truncated to 500 chars, for both the string and array forms of `tool_result.content`. Image payloads are elided to `<elided N chars>`, since a base64 screenshot runs past 500,000 chars. Interrupt markers have `type: "interrupt"`.
+Tool result text truncated to 500 chars, for both the string and array forms of `tool_result.content`. Image payloads are elided to `<elided N chars>`, since a base64 screenshot runs past 500,000 chars. Interrupt markers have `type: "interrupt"`, a `marker` banner string, and a `timestamp`.

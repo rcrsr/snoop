@@ -18,17 +18,17 @@ Captures, processes, and summarizes Claude Code run transcripts for debugging an
 
 ## How it works
 
-Snoop uses Claude Code's hook system to capture transcripts at two points:
+Snoop uses three Claude Code hooks:
 
 | Hook | Trigger | Action |
 |------|---------|--------|
 | `UserPromptSubmit` | User sends a message | Check for an ESC interrupt: a pending `tool_use` without `tool_result`, or Claude Code's `[Request interrupted by user]` marker. Save partial transcript with interrupt marker. |
-| `Stop` | Session ends normally | Wait for the turn's final assistant message to reach the session file, merge any partial transcripts, write final JSONL, update `latest` pointer, prune old files. |
-| `StopFailure` | Session ends in API error (rate limit, 5xx, auth) | Same pipeline as `Stop`, minus the wait. Resulting transcript never has `lastAssistantPreview`, which is how `/snoop:review` identifies a failed turn. Turns that fail before any assistant output also show `0` output tokens and `0` tool calls; turns that fail after tool calls retain both. |
+| `Stop` | Turn ends normally | Wait for the turn's final assistant message to reach the session file, merge any partial transcripts, write final JSONL, update `latest` pointer, prune old files. |
+| `StopFailure` | Turn ends in an API error (rate limit, 5xx, auth) | Same pipeline as `Stop`, minus the wait. Resulting transcript never has `lastAssistantPreview`, which is how `/snoop:review` identifies a failed turn. Turns that fail before any assistant output also show `0` output tokens and `0` tool calls; turns that fail after tool calls retain both. |
 
 **Final message capture:** Claude Code fires `Stop` before it flushes the turn's last assistant message to disk. Snoop polls for up to 1000 ms until the last conversation record is an assistant message, then captures. Without the wait, every transcript would lose its final API call: output tokens, model, and text.
 
-**Message counting:** `messageCount` and duration cover conversation messages only. Claude Code interleaves twelve other record types into the session file (`attachment`, `mode`, `permission-mode`, `last-prompt`, `ai-title`, `file-history-snapshot`, `summary`, `progress`, `system`, `queue-operation`, `pr-link`, `agent-name`); Snoop excludes all of them. None carries a message body.
+**Message counting:** `messageCount` and duration cover conversation messages only: `user` and `assistant` records carrying a message body, plus Snoop's own interrupt markers. Claude Code interleaves at least sixteen bookkeeping record types into the session file (`attachment`, `file-history-snapshot`, `system`, `queue-operation`, and others). Snoop keeps an allow-list rather than naming them, so a new type never inflates the count.
 
 **Interrupt detection:** When you press ESC mid-response, Claude Code writes a `[Request interrupted by user]` marker, and if a tool was running, the last assistant message holds a `tool_use` that never received a `tool_result`. Snoop detects either sign and inserts an interrupt marker before your next message. The marker is the only sign of an ESC during a text or thinking reply.
 
@@ -67,7 +67,7 @@ claude --plugin-dir /path/to/snoop
 
 ## Status Line
 
-After each session, Snoop outputs a status line:
+After each turn, Snoop outputs a status line:
 
 ```
 [snoop] abc12345 | 2m 30s | 45 msgs | 150,000 in (50,000 p / 15,000 cw5m / 5,000 cw1h / 80,000 cr / 53% ce) | 5,000 out (1,800 v / 3,200 r) | 20% s46 / 80% o47 | 2 si (Explore, claude-code-guide) | 12 ti (Read, Edit, Bash)
@@ -76,9 +76,9 @@ After each session, Snoop outputs a status line:
 | Field | Meaning |
 |-------|---------|
 | `abc12345` | Transcript ID (use with `/snoop:review abc12345`) |
-| `2m 30s` | Session duration |
+| `2m 30s` | Turn duration |
 | `45 msgs` | Total messages captured |
-| `150,000 in` | Total input tokens (prompt + cache read + cache write) |
+| `150,000 in` | Total input tokens (prompt + cache read + cache write), main agent plus Task-reported subagent usage |
 | `50,000 p` | Prompt tokens (non-cached input) |
 | `15,000 cw5m` | Cache write tokens (5-minute ephemeral tier) |
 | `5,000 cw1h` | Cache write tokens (1-hour ephemeral tier) |
@@ -99,7 +99,12 @@ A `⚠️ incomplete` marker means the turn's final assistant message never reac
 
 **With ESC interrupts:**
 ```
-[abc12345 | 1m 15s | ⚠️ 2x ESC | 23 msgs | ...]
+[snoop] abc12345 | 1m 15s | ⚠️ 2x ESC | 23 msgs | ...
+```
+
+**With a custom path** from a meta tag:
+```
+[snoop] abc12345 → transcripts/auth-refactor | 2m 30s | ...
 ```
 
 ## Gotchas
@@ -108,7 +113,7 @@ A `⚠️ incomplete` marker means the turn's final assistant message never reac
 
 ## Token Counting
 
-All token counts are API-reported. Main conversation usage comes from streaming message chunks (last chunk per request carries the cumulative total). Subagent usage comes from `toolUseResult.usage`.
+All token counts are API-reported. A request spans several streamed lines; Snoop keeps the one with the largest `output_tokens` per `requestId`, which is the closing line. Input and cache totals cover main-agent requests plus the usage the Task tool reports in `toolUseResult.usage`, so they miss Workflow agents. `out` (`tokens.dedupedOutput`) reads every main and subagent message, so it includes them. See [Output Token Fields](#output-token-fields).
 
 ## Meta Tags
 
@@ -145,7 +150,7 @@ Place `.claude/snoop-context.json` in your project to set default meta values fo
 }
 ```
 
-Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`, `incompleteCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## Output Token Fields
 
@@ -187,7 +192,7 @@ Every captured message also carries its own footprint: `message.usage.context` i
 
 ## Last Assistant Preview
 
-When running on Claude Code 2.1.101+, the meta record includes a `lastAssistantPreview` field: a trimmed, single-line preview of the turn's final assistant message (up to 200 characters, with `…` suffix when truncated). Useful for quickly scanning transcripts in a list. Omitted from the record when Claude Code didn't supply the data (older versions, or StopFailure turns that ended before any assistant output).
+When running on Claude Code 2.1.101+, the meta record includes a `lastAssistantPreview` field: a trimmed, single-line preview of the turn's final assistant message (up to 200 characters, with `…` suffix when truncated). Useful for quickly scanning transcripts in a list. Omitted when Claude Code didn't supply the data (older versions), and always omitted on `StopFailure` turns, which is how `/snoop:review` spots a failed turn.
 
 ## Commands
 
@@ -208,22 +213,33 @@ Transcripts saved to `.claude/transcripts/`:
 
 ## Transcript Format
 
-JSONL with one message per line:
+JSONL. The first line is the meta record (`type: "meta"`, with the fields described above), then one message per line:
 
 ```json
 {
-  "type": "user|assistant|interrupt",
+  "type": "user|assistant",
   "timestamp": "ISO-8601",
   "uuid": "message-uuid",
-  "message": { "role": "user|assistant", "model": "claude-sonnet-4-6", "content": "..." }
+  "parentUuid": "parent-uuid",
+  "requestId": "req_...",
+  "subagent": "agent-id",
+  "message": {
+    "role": "user|assistant",
+    "model": "claude-sonnet-4-6",
+    "content": "...",
+    "usage": { "input": 10, "output": 5, "cacheRead": 100, "cacheCreate": 0, "cache5m": 0, "cache1h": 0, "context": 110 }
+  }
 }
 ```
 
-Interrupt markers inserted when user hits ESC:
+`requestId` appears on assistant rows, `subagent` only on subagent rows, and `usage` only where the API reported it. Tool result text is truncated to 500 chars and image payloads are elided.
+
+Interrupt markers are inserted where the user hit ESC:
 
 ```json
 {
   "type": "interrupt",
-  "marker": "═══════════════════ ⚠️ USER HIT ESC ═══════════════════"
+  "marker": "═══════════════════ ⚠️ USER HIT ESC ═══════════════════",
+  "timestamp": "ISO-8601"
 }
 ```
