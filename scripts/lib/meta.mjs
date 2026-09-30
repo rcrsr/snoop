@@ -208,6 +208,7 @@ const BUILTIN_KEYS = new Set([
   'escInterrupts',
   'tokens',
   'outputByModel',
+  'outputBySpeed',
   'contextWindow',
   'subagentContext',
   'subagents',
@@ -243,6 +244,10 @@ export function buildMetaRecord(stats, metaInfo, context = {}) {
 
   if (stats.outputByModel && Object.keys(stats.outputByModel).length > 0) {
     record.outputByModel = stats.outputByModel
+  }
+
+  if (stats.outputBySpeed && Object.keys(stats.outputBySpeed).length > 0) {
+    record.outputBySpeed = stats.outputBySpeed
   }
 
   // Null when the session file held no assistant usage yet, which is a real

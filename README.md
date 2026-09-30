@@ -86,12 +86,12 @@ After each turn, Snoop outputs a status line:
 | `53% ce` | Cache efficiency (cache read / total input) |
 | `5,000 out` | Output tokens across main and subagent API calls |
 | `1,800 v` | Visible output: text and tool calls you can read |
-| `3,200 r` | Reasoning output: the rest, dominated by thinking blocks |
+| `3,200 r` | Reasoning output: thinking tokens |
 | `20% s46 / 80% o47` | Output share by model, sorted descending. Only shown when multiple models are used (e.g. subagents on a different model). Shortcodes: `s`=sonnet, `o`=opus, `h`=haiku + major + minor version digits. |
 | `2 si (...)` | Subagent invocations with types (falls back to ID if unknown) |
 | `12 ti (...)` | Tool invocations with list of unique tools used |
 
-`v` and `r` sum to the `out` total. A high `r` relative to `v` means the turn spent most of its output budget thinking rather than producing text and tool calls. The breakdown is omitted when `v` exceeds `out`, which happens on a turn dominated by one large tool call, because `v` is a 4-chars/token estimate while `out` is API-reported.
+`v` and `r` sum to the `out` total. A high `r` relative to `v` means the turn spent most of its output budget thinking rather than producing text and tool calls. When every request in the turn reports its thinking tokens (Claude Code 2.1.284+), `r` is that exact count. Otherwise `v` falls back to a 4-chars/token estimate, and the breakdown is omitted when that estimate exceeds `out`, which happens on a turn dominated by one large tool call.
 
 A `⚠️ incomplete` marker means the turn's final assistant message never reached disk before the capture deadline, so the token counts are short. The meta record carries `incompleteCapture: true`.
 
@@ -150,7 +150,7 @@ Place `.claude/snoop-context.json` in your project to set default meta values fo
 }
 ```
 
-Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`, `incompleteCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Context values merge into every transcript meta record. Snoop meta tags override context values when both exist. Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `outputBySpeed`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`, `incompleteCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## Output Token Fields
 
@@ -161,8 +161,12 @@ The meta record carries three output counts. They answer different questions, so
 | `tokens.output` | Legacy count. Main-agent API calls plus whatever usage the Task tool reported for subagents. Undercounts subagent work whenever `toolUseResult` carries no `agentId`, which is always the case for Workflow agents. Semantics frozen so old transcripts stay comparable. |
 | `tokens.dedupedOutput` | API-reported output tokens across main and subagent messages, deduplicated by `requestId`. The number shown as `out` in the status line. |
 | `tokens.visibleOutput` | Estimated tokens you can actually read: characters of `text` blocks plus each tool call's name and JSON input, at 4 chars/token. Thinking blocks excluded. |
+| `tokens.thinkingOutput` | API-reported thinking tokens from `output_tokens_details.thinking_tokens`, deduplicated by `requestId`, summed over the requests that report it. |
+| `tokens.thinkingExact` | `true` when every request in the turn reported its thinking tokens, so `thinkingOutput` is complete. Subagent rows report it about 40% of the time, so turns with subagents are often `false`. |
 
-Reasoning output is the residual, `dedupedOutput - visibleOutput`, floored at `0`. Because `visibleOutput` is a 4-chars/token estimate rather than an API-reported count, that residual carries the estimate's error alongside the thinking tokens. Treat it as an indicator, not a measurement. It is most trustworthy on large turns, where the estimation error is small next to the totals.
+When `thinkingExact` is `true`, the status line's `r` is `thinkingOutput` and `v` is `dedupedOutput - thinkingOutput`, both exact. Otherwise reasoning output is the residual, `dedupedOutput - visibleOutput`, which carries the 4-chars/token estimate's error alongside the thinking tokens. On one real 9,187-token turn the estimate put `v` at 3,674 against an exact 7,080.
+
+`outputBySpeed` in the meta record splits `dedupedOutput` by each request's `usage.speed` (`standard`, or a fast-mode value), for requests that report one. It is absent when none does.
 
 Assistant messages arrive as one JSONL line per content block. Those lines do not repeat the same `usage`: the intermediate ones carry a partial `output_tokens` and only the closing line carries the request's total, for example `1, 1, 1, 1, 276`. Both `dedupedOutput` and `visibleOutput` account for this. The first keeps one usage per `requestId`, the one with the largest `output_tokens`, which is the closing line. The second sums characters across lines and deduplicates only exact `uuid` repeats.
 

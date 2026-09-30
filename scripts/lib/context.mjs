@@ -67,6 +67,11 @@ export function modelWindow(modelId) {
 export function contextOccupancy(usage) {
   if (!usage) return 0
   if (typeof usage.context === 'number') return usage.context
+  // `iterations` lists each API iteration a request made. Every observed row
+  // has one, but with several the top-level fields may aggregate them, which
+  // overstates the window. The last iteration's prompt is the one occupying it.
+  const { iterations } = usage
+  if (Array.isArray(iterations) && iterations.length > 1) usage = iterations[iterations.length - 1]
   const input = usage.input_tokens ?? usage.input ?? 0
   const cacheCreate = usage.cache_creation_input_tokens ?? usage.cacheCreate ?? 0
   const cacheRead = usage.cache_read_input_tokens ?? usage.cacheRead ?? 0
