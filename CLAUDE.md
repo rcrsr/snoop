@@ -26,7 +26,7 @@ node --test test/*.test.mjs
 | `scripts/lib/tokens.mjs` | Token calculation from API-reported usage |
 | `scripts/lib/context.mjs` | Context window occupancy and per-model window sizes |
 | `scripts/lib/meta.mjs` | Meta tag scanning and parsing |
-| `hooks/hooks.json` | Binds `UserPromptSubmit`, `Stop`, and `StopFailure` events |
+| `hooks/hooks.json` | Binds `UserPromptSubmit`, `Stop`, `StopFailure`, and `SessionEnd` events |
 | `agents/transcript-reviewer.md` | Post-mortem analysis agent (haiku model) |
 | `skills/review/SKILL.md` | `/snoop:review` entry point (Claude Code 2.1.3+) |
 
@@ -37,6 +37,7 @@ node --test test/*.test.mjs
 | `UserPromptSubmit` | Detect ESC interrupt (pending `tool_use` or `[Request interrupted by user` marker), save partial transcript |
 | `Stop` | Wait for final assistant message, merge partials, write meta record + messages, update `latest` pointer, prune to 10 files |
 | `StopFailure` | Same pipeline as `Stop` minus the wait; fires instead of `Stop` on API errors (rate limit, 5xx, auth). Captured transcript never has `lastAssistantPreview`. Turns that fail before any assistant output also show `0` output tokens and `0` tools; turns that fail after tool calls retain both. |
+| `SessionEnd` | Flush subagent messages written since the last snoop capture started (`previousCaptureStart()` over the whole file). Writes nothing when none exist, or when the session has no earlier capture to bound from. No partial merge, no preview; `timing` spans the agent messages. The meta record carries `trailingCapture: true`. A resumed session's next `Stop` re-captures the same messages, since SessionEnd leaves no `stop_hook_summary` behind |
 
 `Stop` fires before Claude Code flushes the turn's final assistant message to the session file. `readSettledTranscript()` polls for up to 1000 ms (50 ms interval) until the last conversation record is an assistant message with no pending `tool_use`, then returns whatever it has plus a `settled` flag. Without this the final API call's tokens, model, and text are lost. A line holding only a `tool_use` is mid-turn even though it is an assistant record, so `isFinalAssistantMessage()` rejects it. On timeout the meta record gets `incompleteCapture: true`.
 
@@ -62,7 +63,7 @@ Place `.claude/snoop-context.json` in the project root to set default meta value
 ```
 
 Merge order: context file values < snoop meta tag values.
-Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `outputBySpeed`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `lastAssistantPreview`, `incompleteCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
+Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `outputBySpeed`, `contextWindow`, `subagentContext`, `tools`, `messageCount`, `toolCount`, `escInterrupts`, `subagents`, `workflows`, `lastAssistantPreview`, `incompleteCapture`, `trailingCapture`) cannot be overwritten by either source. `file` is only allowed in meta tags, not in the context file.
 
 ## When Editing
 
@@ -73,7 +74,7 @@ Built-in keys (`type`, `transcriptId`, `timing`, `tokens`, `outputByModel`, `out
 - **Window size**: transcript only. `MODEL_WINDOWS` in `lib/context.mjs` maps family-version to the model's maximum input window from Anthropic's model table; add a row when a model ships. `windowBasis` is `model` (listed), `observed` (unlisted, a reading on that same model passed 200k), or `unknown` (size and percentages `null`). The window follows the reading row's model, never a session-wide peak, so a `/model` switch is handled. Never read argv or `settings.json`: `ANTHROPIC_MODEL` and `/model` override both without a trace.
 - **Message filtering**: `lib/messages.mjs` - `streamlineMessage()` controls captured fields
 - **Meta tag parsing**: `lib/meta.mjs` - `scanForMetaTags()` extracts tag attributes. Always pass raw records, never streamlined ones: streamlining truncates tool results to 500 chars. ESC partials store their scan in a `meta-scan` record that `handleStop` strips on merge
-- **Subagent loading**: `loadSubagentMessages()` in main script. `findSubagentFiles()` recurses, since Task agents sit in `subagents/` but Workflow agents sit in `subagents/workflows/wf_<runId>/`. Names come from `agent-<id>.meta.json` sidecars via `loadAgentTypes()`, falling back to `buildAgentNameMap()`. Subagent messages are bounded by `previousCaptureStart()`: the last `stop_hook_summary` naming snoop, minus its `durationMs`. Workflow agents run after `Workflow` returns `async_launched`, so bounding by the turn's first message lost 95% of them. The first capture in a session falls back to the turn start. `timing` uses main-chain records only.
+- **Subagent loading**: `loadSubagentMessages()` in main script. `findSubagentFiles()` recurses, since Task agents sit in `subagents/` but Workflow agents sit in `subagents/workflows/wf_<runId>/`. Names, `description`, `spawnDepth`, and `isFork` come from `agent-<id>.meta.json` sidecars via `loadAgentSidecars()`; names fall back to `buildAgentNameMap()`. `collectRunInfo()` reads `durationMs` and workflow names from `toolUseResult` records across the whole session, since a workflow launched in an earlier turn still names its later agents. A workflow agent's `runId` is its `workflows/wf_<runId>/` directory. Subagent messages are bounded by `previousCaptureStart()`: the last `stop_hook_summary` naming snoop, minus its `durationMs`. Workflow agents run after `Workflow` returns `async_launched`, so bounding by the turn's first message lost 95% of them. The first capture in a session falls back to the turn start. `timing` uses main-chain records only.
 - **Turn start**: `findLastUserPromptIndex()` walks back to the first external prompt sharing the last one's `promptId`, since a `!` command writes `<bash-input>` then `<bash-stdout>`. `isExternalUserPrompt()` rejects `isMeta` records. A Skill re-invocation injects an `isMeta` string after the prompt, which otherwise starts the capture mid-turn.
 
 ## Transcript Schema
@@ -95,10 +96,12 @@ JSONL with meta record first, then one message per line:
 | `outputByModel` | object | Per-model output token counts, deduped by `requestId` (optional) |
 | `outputBySpeed` | object | Output token counts by `usage.speed`, deduped by `requestId` (optional; absent when no request reports a speed) |
 | `contextWindow` | object | Context occupancy at end of turn: `used`, `peak`, `size`, `windowBasis`, `usedPercentage`, `peakPercentage`, `model`, `peakModel`, `compactThreshold`, `headroom`, `compactions` (optional; absent when no assistant usage exists yet). `size`, the percentages, `compactThreshold`, and `headroom` are `null` when `windowBasis` is `unknown` |
-| `subagentContext` | array | Per-subagent occupancy: `agentId`, `peak`, `size`, `peakPercentage`, `models`, `name` (optional) |
+| `subagentContext` | array | Per-subagent occupancy: `agentId`, `peak`, `size`, `peakPercentage`, `models`, plus optional `name`, `description` (the call's task label), `spawnDepth`, `isFork` (only when `true`), `durationMs` (from the Agent result; absent for workflow agents) |
+| `workflows` | array | Workflow runs this capture touched, launched this turn or with agent messages in it: `runId`, `workflowName` (optional) |
 | `subagents` | array | Subagent type names (if any) |
 | `lastAssistantPreview` | string | Single-line preview of final assistant message, ≤200 chars (optional, Claude Code 2.1.101+). Absent means the turn produced no final assistant message, which is how failures are detected. Empty string means it produced a blank one |
 | `incompleteCapture` | boolean | Present and `true` only when the settle poll timed out. Token counts, `outputByModel`, and the preview are short |
+| `trailingCapture` | boolean | Present and `true` only on a `SessionEnd` capture of subagent work after the last `Stop` |
 | `description` | string | From meta tag or context file (optional) |
 | `tags` | array | From meta tag or context file (optional) |
 | `*` | any | Dynamic attributes from meta tag or context file |

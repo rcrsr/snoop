@@ -153,10 +153,9 @@ export function isConversationMessage(msg) {
 /**
  * Check if message should be skipped from transcript.
  *
- * Claude Code interleaves a dozen bookkeeping record types with the real
- * messages: attachment, mode, permission-mode, last-prompt, ai-title, system,
- * queue-operation, pr-link, agent-name, file-history-snapshot, summary,
- * progress. None carries a message body. Naming them individually meant every
+ * Claude Code interleaves at least sixteen bookkeeping record types with the
+ * real messages (test/messages.test.mjs lists them). None carries a message
+ * body. Naming them individually meant every
  * record type Claude Code added silently inflated messageCount and corrupted
  * timing until someone noticed, so keep what we understand instead: the two
  * conversation types, plus the interrupt marker snoop writes itself.

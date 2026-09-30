@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Dual-purpose hook for capturing run transcripts.
+ * Hook for capturing run transcripts.
  * - UserPromptSubmit: Detects ESC interrupts, saves partial transcripts
- * - Stop: Merges partials, captures complete transcript with meta record
+ * - Stop / StopFailure: Merges partials, captures complete transcript with meta record
+ * - SessionEnd: Captures subagent work written after the last Stop, if any
  */
 
 import * as fs from 'fs'
@@ -87,25 +88,49 @@ function mtimeOf(file) {
 }
 
 /**
- * Map agentId -> agentType from the agent-<id>.meta.json sidecar Claude Code
+ * Map agentId -> sidecar fields from the agent-<id>.meta.json file Claude Code
  * writes beside each agent transcript. Covers Task and Workflow agents alike,
  * unlike buildAgentNameMap(), which can only name agents reached through a
- * Task tool_use / toolUseResult pair.
+ * Task tool_use / toolUseResult pair. `description` is the call's task label,
+ * which tells apart parallel agents of one type.
  */
-function loadAgentTypes(sidecars) {
-  const types = new Map()
+function loadAgentSidecars(sidecars) {
+  const agents = new Map()
 
   for (const file of sidecars) {
     try {
-      const { agentType } = JSON.parse(fs.readFileSync(file, 'utf-8'))
-      if (agentType) types.set(path.basename(file, '.meta.json'), agentType)
+      const { agentType, description, spawnDepth, isFork } = JSON.parse(fs.readFileSync(file, 'utf-8'))
+      agents.set(path.basename(file, '.meta.json'), { agentType, description, spawnDepth, isFork })
     } catch {
       // Unreadable or malformed sidecar: fall back to the tool_use pairing
     }
   }
 
-  return types
+  return agents
 }
+
+/**
+ * Durations and workflow names from the session's toolUseResult records. An
+ * Agent result carries `totalDurationMs`; a Workflow result carries `runId`
+ * and `workflowName`. Workflow agents often finish turns after their launch,
+ * so the whole session is searched, not only this turn.
+ */
+function collectRunInfo(messages) {
+  const agentDurations = new Map()
+  const workflowNames = new Map()
+  for (const msg of messages) {
+    const result = msg.toolUseResult
+    if (!result || typeof result !== 'object') continue
+    if (result.agentId && Number.isFinite(result.totalDurationMs)) {
+      agentDurations.set('agent-' + result.agentId, result.totalDurationMs)
+    }
+    if (result.runId && result.workflowName) workflowNames.set(result.runId, result.workflowName)
+  }
+  return { agentDurations, workflowNames }
+}
+
+// Workflow agents sit in subagents/workflows/<runId>/.
+const workflowRunIdOf = (file) => file.match(/[\\/]workflows[\\/](wf_[^\\/]+)[\\/]/)?.[1] ?? null
 
 /**
  * Raw messages from the agents this turn spawned, each paired with its agent
@@ -122,11 +147,12 @@ async function loadSubagentMessages(transcripts, turnStart) {
     if (turnStart && mtimeOf(file) < turnStart) continue
 
     const agentId = path.basename(file, '.jsonl')
+    const runId = workflowRunIdOf(file)
     const messages = await readJsonLines(file)
 
     for (const msg of messages) {
       if (shouldSkipMessage(msg)) continue
-      allMessages.push({ agentId, msg })
+      allMessages.push({ agentId, runId, msg })
     }
   }
 
@@ -301,10 +327,15 @@ async function handleStop(
   // StopFailure fires when the API call errored, so no final assistant message
   // is coming. Read once rather than waiting out the timeout.
   const isFailure = hookEvent === 'StopFailure'
-  const { messages, settled } = isFailure
-    ? { messages: await readJsonLines(transcriptPath), settled: false }
-    : await readSettledTranscript(transcriptPath)
-  const startIndex = findLastUserPromptIndex(messages)
+  // SessionEnd flushes subagent work written after the last Stop, typically a
+  // workflow still running as the user closed the session: 7.1% of subagent
+  // output tokens across 44 sessions fell there. It has no turn of its own.
+  const isSessionEnd = hookEvent === 'SessionEnd'
+  const { messages, settled } =
+    isFailure || isSessionEnd
+      ? { messages: await readJsonLines(transcriptPath), settled: !isFailure }
+      : await readSettledTranscript(transcriptPath)
+  const startIndex = isSessionEnd ? messages.length : findLastUserPromptIndex(messages)
 
   if (startIndex < 0) {
     return { decision: 'approve', systemMessage: '' }
@@ -320,7 +351,7 @@ async function handleStop(
   // throwing and stranding the file, which would fail every later Stop too.
   let combined = []
   let partialMeta = null
-  if (fs.existsSync(partialFile)) {
+  if (!isSessionEnd && fs.existsSync(partialFile)) {
     for (const record of await readJsonLines(partialFile)) {
       if (record.type === PARTIAL_META_TYPE) partialMeta = record.meta
       else combined.push(record)
@@ -337,7 +368,11 @@ async function handleStop(
   // takes in agents that ran between turns. The first capture in a session has
   // no previous one and falls back to this turn's first message.
   const turnStart = current[0]?.timestamp ? new Date(current[0].timestamp).getTime() : 0
-  const since = previousCaptureStart(messages, startIndex) ?? turnStart
+  const previousStart = previousCaptureStart(messages, startIndex)
+  // With no earlier capture there is no bound, and 0 would take every agent the
+  // session ever ran.
+  if (isSessionEnd && previousStart === null) return { decision: 'approve', systemMessage: '' }
+  const since = previousStart ?? turnStart
   const subagentFiles = walkSubagentFiles(subagentsDirFor(transcriptPath))
   const subagentRaw = (await loadSubagentMessages(subagentFiles.transcripts, since)).filter(
     ({ msg }) => {
@@ -350,6 +385,7 @@ async function handleStop(
     subagent: agentId,
   }))
   combined.push(...subagentMessages)
+  if (isSessionEnd && subagentMessages.length === 0) return { decision: 'approve', systemMessage: '' }
 
   // Scan raw records for meta tags, since streamlining truncates tool results.
   // Order matches combined: partial, then current, then subagents; last wins.
@@ -382,10 +418,14 @@ async function handleStop(
   // Calculate stats
   // Main-chain records only: subagent messages can now predate the prompt, and
   // time spent between turns is not part of this turn.
-  const timing = calculateTiming(
-    combined.filter((m) => !m.subagent),
-    hookTime
-  )
+  // A trailing capture has no main-chain records, so it spans the agent work,
+  // not the gap until the user closed the session.
+  const timing = isSessionEnd
+    ? calculateTiming(combined)
+    : calculateTiming(
+        combined.filter((m) => !m.subagent),
+        hookTime
+      )
   const msgCount = combined.length
   const toolCount = countToolUses(combined)
   const uniqueTools = getUniqueTools(combined)
@@ -405,11 +445,30 @@ async function handleStop(
   const contextWindow = calculateContextWindow(messages)
   const subagentIds = Array.from(new Set(subagentMessages.map((m) => m.subagent))).sort()
   // Sidecars only ever name ids this turn used, so skip the reads when it used none.
-  const agentTypes = subagentIds.length ? loadAgentTypes(subagentFiles.sidecars) : new Map()
+  const sidecars = subagentIds.length ? loadAgentSidecars(subagentFiles.sidecars) : new Map()
   const agentNameMap = subagentIds.length ? buildAgentNameMap(combined) : new Map()
-  const nameForAgent = (id) => agentTypes.get(id) || agentNameMap.get(id) || null
+  const nameForAgent = (id) => sidecars.get(id)?.agentType || agentNameMap.get(id) || null
   const subagentNames = [...new Set(subagentIds.map((id) => nameForAgent(id) || id))].sort()
-  const subagentContext = calculateSubagentContext(subagentMessages, nameForAgent)
+  const { agentDurations, workflowNames } = collectRunInfo(messages)
+  const detailsForAgent = (id) => {
+    const sidecar = sidecars.get(id) ?? {}
+    return {
+      ...(sidecar.description && { description: sidecar.description }),
+      ...(Number.isFinite(sidecar.spawnDepth) && { spawnDepth: sidecar.spawnDepth }),
+      ...(sidecar.isFork === true && { isFork: true }),
+      ...(agentDurations.has(id) && { durationMs: agentDurations.get(id) }),
+    }
+  }
+  const subagentContext = calculateSubagentContext(subagentMessages, nameForAgent, detailsForAgent)
+
+  // Workflow runs this capture touched: launched this turn, or with agent
+  // messages in it. A run launched earlier still has its name in the session.
+  const runIds = new Set(subagentRaw.map(({ runId }) => runId).filter(Boolean))
+  for (const msg of currentRaw) if (msg.toolUseResult?.runId) runIds.add(msg.toolUseResult.runId)
+  const workflows = [...runIds].sort().map((runId) => ({
+    runId,
+    ...(workflowNames.has(runId) && { workflowName: workflowNames.get(runId) }),
+  }))
 
   // Build meta record
   const metaRecord = buildMetaRecord(
@@ -426,13 +485,16 @@ async function handleStop(
       contextWindow,
       subagentContext,
       subagents: subagentNames,
+      workflows,
       // A failed turn produced no final assistant message. Whatever Claude Code
       // hands the hook on StopFailure, the field stays absent: consumers key
       // failure detection on that absence.
-      lastAssistantPreview: isFailure ? null : buildLastAssistantPreview(lastAssistantMessage),
+      // A trailing capture has no assistant turn of its own either.
+      lastAssistantPreview: isFailure || isSessionEnd ? null : buildLastAssistantPreview(lastAssistantMessage),
       // The final assistant message never landed. Token counts, outputByModel,
       // and the preview are short. Say so rather than reporting them as whole.
       incompleteCapture: !settled && !isFailure,
+      trailingCapture: isSessionEnd,
     },
     metaInfo,
     snoopContext

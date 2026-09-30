@@ -32,6 +32,7 @@ JSONL with one message per line:
 | `output` | Output tokens for this request |
 | `cacheRead` | Tokens read from prompt cache |
 | `cacheCreate` | Tokens written to prompt cache |
+| `thinking` | Exact thinking tokens for this request, when reported |
 | `context` | Window occupancy at this request (`input + cacheCreate + cacheRead`). Tracks how full the context was as the session progressed; a subagent row reads against that agent's own window. Zero means an API-error row, not an empty window |
 
 ## Large File Strategy
@@ -44,6 +45,8 @@ Transcripts often exceed context limits. Survey first, then read targeted chunks
 wc -l transcript.jsonl                                   # Message count
 jq -r '.type' transcript.jsonl | sort | uniq -c          # Type distribution
 jq -r '.subagent // empty' transcript.jsonl | sort -u    # List subagents
+head -1 transcript.jsonl | jq '.subagentContext[] | {agentId, name, description, durationMs, peakPercentage}'  # Who each agent was
+head -1 transcript.jsonl | jq '.workflows'               # Workflow runs this capture touched
 jq -s 'map(select(.input)) | add | {input, output, cacheRead}' transcript.jsonl  # Token totals
 jq -r 'select(.message.usage.context > 0) | .message.usage.context' transcript.jsonl | cat -n | awk 'NR % 10 == 1'  # Context growth curve, every 10th request
 grep -n '"is_error":true' transcript.jsonl | cut -d: -f1 # Error line numbers
@@ -209,7 +212,8 @@ Issue: Redundant file read — same file read twice in one response.
 - Cache read: {total}
 - Context used: {contextWindow.usedPercentage}% ({contextWindow.used} / {contextWindow.size}) on {contextWindow.model}. When `windowBasis` is `unknown`, report `{contextWindow.used}` tokens with no percentage
 - Context peak: {contextWindow.peakPercentage}%
-- Subagents: {count}
+- Subagents: {count}. List each as `{name}: {description}` with `{durationMs}` when present, from `subagentContext`, so parallel agents of one type stay distinguishable. Mark `isFork` agents as forks
+- Workflows: `{workflowName}` (`{runId}`) per `workflows` entry, if any
 - Tool calls: {count}
 - Errors: {count}
 - Files read: {unique count}

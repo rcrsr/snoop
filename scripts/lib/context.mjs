@@ -187,7 +187,7 @@ export function calculateContextWindow(messages) {
  * spawned by an opus session is traced back. `size` is the window of the model
  * that produced the peak, resolved the same way as the main session's.
  */
-export function calculateSubagentContext(messages, nameFor = () => null) {
+export function calculateSubagentContext(messages, nameFor = () => null, detailsFor = () => ({})) {
   const byAgent = new Map()
 
   for (const msg of messages) {
@@ -224,6 +224,7 @@ export function calculateSubagentContext(messages, nameFor = () => null) {
         peakPercentage: percentOf(peak, size),
         models: Array.from(models).sort(),
         ...(name && { name }),
+        ...detailsFor(agentId),
       }
     })
     .sort((a, b) => b.peak - a.peak)

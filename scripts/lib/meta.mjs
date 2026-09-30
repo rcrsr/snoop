@@ -212,8 +212,10 @@ const BUILTIN_KEYS = new Set([
   'contextWindow',
   'subagentContext',
   'subagents',
+  'workflows',
   'lastAssistantPreview',
   'incompleteCapture',
+  'trailingCapture',
 ])
 
 // All reserved keys: special + built-in
@@ -264,6 +266,10 @@ export function buildMetaRecord(stats, metaInfo, context = {}) {
     record.subagents = stats.subagents
   }
 
+  if (stats.workflows && stats.workflows.length > 0) {
+    record.workflows = stats.workflows
+  }
+
   // Absent means the turn produced no final assistant message. An empty string
   // means it produced a blank one. The two must stay distinguishable.
   if (stats.lastAssistantPreview != null) {
@@ -272,6 +278,10 @@ export function buildMetaRecord(stats, metaInfo, context = {}) {
 
   if (stats.incompleteCapture) {
     record.incompleteCapture = true
+  }
+
+  if (stats.trailingCapture) {
+    record.trailingCapture = true
   }
 
   // Layer 1: context file values (excluding reserved attrs handled below)
