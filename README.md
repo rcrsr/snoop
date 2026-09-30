@@ -212,7 +212,7 @@ Every captured message also carries its own footprint: `message.usage.context` i
 
 ## Last Assistant Preview
 
-When running on Claude Code 2.1.101+, the meta record includes a `lastAssistantPreview` field: a trimmed, single-line preview of the turn's final assistant message (up to 200 characters, with `…` suffix when truncated). Useful for quickly scanning transcripts in a list. Omitted when Claude Code didn't supply the data (older versions), and always omitted on `StopFailure` turns, which is how `/snoop:review` spots a failed turn.
+When running on Claude Code 2.1.101+, the meta record includes a `lastAssistantPreview` field: a trimmed, single-line preview of the turn's final assistant message (up to 200 characters, with `…` suffix when truncated). Useful for quickly scanning transcripts in a list. Omitted when Claude Code didn't supply the data (older versions), and always omitted on `StopFailure` turns and `trailingCapture` records. `/snoop:review` treats its absence as a failed turn unless `trailingCapture` is set.
 
 ## Commands
 

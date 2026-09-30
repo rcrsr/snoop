@@ -22,6 +22,7 @@ Analyze a run transcript to identify issues and improvement opportunities.
 
 | Input Format | Resolution |
 | ------------ | ---------- |
+| A path containing `/` | Use as-is, relative to the project root. Transcripts named by a `<snoop:meta file=.../>` tag live there, not in `.claude/transcripts/` |
 | `abc123.jsonl` | Use as-is |
 | `abc123` (8 chars) | Append `.jsonl` |
 | No identifier | Read from `latest` pointer |
@@ -40,16 +41,10 @@ If no transcript files exist, report to user and stop.
 
 ## Step 2: Analyze Transcript
 
-Delegate to the transcript-reviewer agent with the resolved file path:
+Delegate to the `snoop:transcript-reviewer` agent with the resolved file path, plus the concern if the arguments carried one:
 
 ```
-Use the transcript-reviewer agent to analyze {resolved_path}
-```
-
-If a concern was extracted from arguments, include it:
-
-```
-Use the transcript-reviewer agent to analyze {resolved_path}. Focus on: {concern}
+Analyze {resolved_path}. Focus on: {concern}
 ```
 
 ## Step 3: Report Results
